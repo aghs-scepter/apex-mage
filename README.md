@@ -8,11 +8,11 @@ Free and open source under a collaborative license - feel free to modify and enh
 **If you need support or encounter issues with installation, [reach out to me on Discord](https://discord.com/users/833494957024870401)**
 
 ## Requirements
-As a Discord bot, Apex Mage requires some setup via the [Discord Developer Portal](https://discord.com). Instructions for a basic bot setup are available [here](https://discordgsm.com/guide/how-to-get-a-discord-bot-token).
+As a Discord bot, Apex Mage requires some setup via the [Discord Developer Portal](https://discord.com/developers). Instructions for a basic bot setup are available [here](https://discordgsm.com/guide/how-to-get-a-discord-bot-token).
 
-The bot's AI features require API keys for [Anthropic](https://console.anthropic.com) and [Fal.AI](https://fal.ai). When initially setting up the bot, you'll be prompted for these keys, so it would be wise to set up accounts on these services in advance. Instructions for are available for both [the Anthropic API](https://docs.anthropic.com/en/api/getting-started#accessing-the-api) and [the Fal.AI API](https://docs.fal.ai/authentication/key-based/).
+The bot's AI features require API keys for [Anthropic](https://console.anthropic.com) and [Fal.AI](https://fal.ai). When initially setting up the bot, you'll be prompted for these keys, so it would be wise to set up accounts on these services in advance. Instructions are available for both [the Anthropic API](https://docs.anthropic.com/en/api/getting-started#accessing-the-api) and [the Fal.AI API](https://docs.fal.ai/authentication/key-based/).
 
-Finally, you need a way to host the bot. I use [Google Cloud Platform](https://cloud.google.com)'s Compute Engine service for my hosting (specifically, an `e2-micro` instance), but you can use any Linux virtual machine.
+Finally, you need a way to host the bot. I use [Google Cloud Platform](https://cloud.google.com)'s Compute Engine service for my own hosting (specifically, an `e2-micro` instance), but you can use any Linux virtual machine as long as it can accept HTTP and HTTPS traffic from the internet.
 
 ## Quickstart
 
