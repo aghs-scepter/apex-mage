@@ -70,6 +70,10 @@ Users can interact with Apex Mage via the slash commands below.
 
 - `/help` - Displays a list of commands with quick instructions for use.
 
+## License
+
+This software is free for non-commercial use. If you would like to use this software commercially, please refer to [the license](LICENSE) for information on what qualifies as commercial use and how to get in contact with me.
+
 ## Support/Contact
 
 **If you need support or encounter issues with installation, [reach out to me on Discord](https://discord.com/users/833494957024870401)**

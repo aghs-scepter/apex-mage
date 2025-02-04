@@ -1,5 +1,8 @@
 #!/bin/bash
 
+echo "Apex Mage  Copyright (C) 2025  Kev Silver"
+echo "This program comes with ABSOLUTELY NO WARRANTY. This is software is free for non-commercial use, and you are welcome to redistribute it under certain conditions; read the LICENSE file for details."
+
 # Create appdata (persistent DB storage) directory if it doesn't exist
 mkdir -p /appdata
 
