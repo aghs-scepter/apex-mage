@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS channels(
+    channel_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    discord_id INT NOT NULL
+);

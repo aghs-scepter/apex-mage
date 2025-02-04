@@ -1,0 +1,6 @@
+data/app.db
+discord_auth.json
+.venv/*
+__pycache__/*
+*.pyc
+.DS_Store

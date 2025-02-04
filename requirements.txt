@@ -1,0 +1,4 @@
+discord.py==2.*
+anthropic==0.*
+fal-client==0.*
+pillow==11.*

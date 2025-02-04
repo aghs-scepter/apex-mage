@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS vendors(
+    vendor_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vendor_name VARCHAR(255) NOT NULL,
+    vendor_model_name VARCHAR(255) NOT NULL
+);
