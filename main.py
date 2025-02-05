@@ -160,7 +160,7 @@ async def create_image(interaction: discord.Interaction, prompt: str):
     image_data = await ai.compress_image(image_data) # Compress the image to reduce token count
     str_image = json.dumps([{ "filename": "image.jpeg", "image": image_data }])
     # Dear reader, I am so sorry for this. But Anthropic's API freaks the fuck out if you specify that a bot, rather than a user, uploaded an image as context.
-    mem.add_message_with_images(interaction.channel.id, 'Fal.AI', "prompt", False, "", str_image)
+    mem.add_message_with_images(interaction.channel.id, 'Fal.AI', "prompt", False, "Image", str_image)
     
     # Format the image response as a Discord file object
     output_file = await ai.format_image_response(image_data, "jpeg", response["has_nsfw_concepts"]) # Fal.AI returns jpeg-format image files
