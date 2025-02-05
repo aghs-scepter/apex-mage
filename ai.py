@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import binascii
 import discord
 import json
 import io
@@ -216,7 +217,13 @@ async def compress_image(image_data_b64: str, max_size=(512, 512), quality=75) -
     Returns:
     str: The base64-encoded compressed image data.
     """
-    image_data = base64.b64decode(image_data_b64)
+    try:
+        image_data = base64.b64decode(image_data_b64)
+    except binascii.Error:
+        # Add extra padding only if initial decode fails
+        while len(image_data_b64) % 4:
+            image_data_b64 += '='
+        return base64.b64decode(image_data_b64)
     img = Image.open(io.BytesIO(image_data))
 
     # Convert RGBA or P modes to RGB if necessary

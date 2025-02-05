@@ -133,6 +133,9 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
         message += "> `Note`: Some older messages were removed from context. Use `/clear` to reset the bot!\n"
     message += f'`Prompt:` {prompt}\n\n`Response:` {response}'
 
+    if len(message) > 2000:
+        message = message[:1975] + "--[response too long]--" # Discord has a 2000 character limit for messages
+
     # Update the deferred message with the AI's response. Only include a file upload if required.
     if images:
         await interaction.followup.send(content=message, file=image_file)
