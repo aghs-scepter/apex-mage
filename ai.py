@@ -111,13 +111,28 @@ async def prompt_anthropic(prompt_type: str, prompt: str, context) -> str:
     # For regular prompts, format the prompt and get system context
     formatted_prompt, system_prompt = await format_prompt_anthropic(prompt_type, prompt, context)
     
-    response = anthropic_client.messages.create(
-        model=model,
-        max_tokens=4096,
-        system=system_prompt,
-        messages=formatted_prompt
-    )
-    return response.content[0].text
+    # Retry vars
+    max_retries = 4
+    backoff_factor = 2
+
+    for retry in range(max_retries):
+        try:
+            response = anthropic_client.messages.create(
+                model=model,
+                max_tokens=8192,
+                system=system_prompt,
+                messages=formatted_prompt
+            )
+            return response.content[0].text
+        except Exception as ex:
+            if "529" in str(ex): # Anthropic can throw 529 errors when servers are overloaded
+                sleep_time = backoff_factor ** retry
+                logging.warning(f"Anthropic client returned a 529 error. Retrying in {sleep_time:.2f} seconds...")
+                await asyncio.sleep(sleep_time)
+            else:
+                raise ex
+
+    raise Exception("Max retries exceeded for Anthropic API call")
 
 async def format_prompt_anthropic(prompt_type: str, prompt: str, context) -> tuple[str, str]:
     """
