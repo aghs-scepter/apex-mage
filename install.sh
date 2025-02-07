@@ -2,7 +2,7 @@
 
 echo "========================================="
 echo "Apex Mage  Copyright (C) 2025  Kev Silver"
-echo "This program comes with ABSOLUTELY NO WARRANTY. This is software is free for non-commercial use, and you are welcome to redistribute it under certain conditions; read the LICENSE file for details."
+echo "This program comes with ABSOLUTELY NO WARRANTY. This software is free for non-commercial use, and you are welcome to redistribute it under certain conditions; read the LICENSE file for details."
 echo "========================================="
 
 # Create appdata (persistent DB storage) directory if it doesn't exist
@@ -32,24 +32,24 @@ echo "Enter your Fal.AI API key:"
 read -r FAL_KEY
 echo ""
 
-echo "There are additional settings you can configure, such as rate-limits for requests to prevent API abuse. Would you like to configure these settings now? (Y/n)"
+echo "There are additional settings you can configure, such as rate-limits for requests to prevent API abuse. The defaults are sensible, but you can customize them. Would you like to configure these settings now? (Y/n)"
 read -r CONFIGURE_SETTINGS
 CONFIGURE_SETTINGS=${CONFIGURE_SETTINGS:-Y}
 CONFIGURE_SETTINGS=$(echo "$CONFIGURE_SETTINGS" | tr '[:upper:]' '[:lower:]')
 echo ""
 
 if [ "$CONFIGURE_SETTINGS" = "y" ]; then
-    echo "Enter the maximum number of requests per hour for the Anthropic API (default: 30):"
+    echo "Enter the maximum number of requests per hour for the Anthropic text API (default: 30):"
     read -r ANTHROPIC_RATE_LIMIT
     ANTHROPIC_RATE_LIMIT=${ANTHROPIC_RATE_LIMIT:-30}
     echo ""
 
-    echo "Enter the maximum number of requests per hour for the Fal.AI API (default: 8):"
+    echo "Enter the maximum number of requests per hour for the Fal.AI image API (default: 8):"
     read -r FAL_RATE_LIMIT
     FAL_RATE_LIMIT=${FAL_RATE_LIMIT:-8}
     echo ""
 
-    echo "Enter the number of images to keep in context when prompting the AI (default: 5):"
+    echo "Enter the number of images to keep in context when prompting the AI. Lower number = cheaper prompts; I don't advise dropping this below 2. (default: 5):"
     read -r IMAGE_CONTEXT_SIZE
     IMAGE_CONTEXT_SIZE=${IMAGE_CONTEXT_SIZE:-5}
     echo ""
@@ -79,7 +79,7 @@ FAL_RATE_LIMIT=$FAL_RATE_LIMIT
 IMAGE_CONTEXT_SIZE=$IMAGE_CONTEXT_SIZE
 EOF
 
-echo "Your API keys have been saved to /app/.env. You can run `update-keys.sh` to update your keys and settings at any time."
+echo "Your API keys and settings have been saved to /app/.env. You can run `update-keys.sh` to update these keys and settings at any time."
 echo "Press any key to continue."
 read -n1 -s
 echo ""
