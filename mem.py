@@ -1,4 +1,5 @@
 from typing import Optional, Dict, List, Any
+from os import getenv
 import json
 import logging
 import sqlite3
@@ -180,6 +181,40 @@ def get_visible_messages(discord_id: int, vendor_name: str) -> List[Dict[str, An
     logging.debug(f"Visible messages retrieved for channel {discord_id} and vendor {vendor_name}.")
     return [row_to_dict(row) for row in rows]
 
+def get_count_recent_image_requests(discord_id: int) -> int:
+    """
+    Gets the count of recent image requests for a given channel. This is used to enforce rate limits.
+
+    Parameters:
+    discord_id (int): The Discord ID of the channel to retrieve image requests for.
+
+    Returns:
+    int: The count of recent image requests.
+    """
+    logging.debug(f"Getting count of recent image requests for channel {discord_id}...")
+    query = open('db/get_count_recent_image_requests.sql').read()
+    cursor = db.execute(query, (discord_id,))
+    row = cursor.fetchone()
+    logging.debug(f"Count of recent image requests retrieved for channel {discord_id}.")
+    return row['count'] if row else 0
+
+def get_count_recent_text_requests(discord_id: int) -> int:
+    """
+    Gets the count of recent text requests for a given channel. This is used to enforce rate limits.
+
+    Parameters:
+    discord_id (int): The Discord ID of the channel to retrieve text requests for.
+
+    Returns:
+    int: The count of recent text requests.
+    """
+    logging.debug(f"Getting count of recent text requests for channel {discord_id}...")
+    query = open('db/get_count_recent_text_requests.sql').read()
+    cursor = db.execute(query, (discord_id,))
+    row = cursor.fetchone()
+    logging.debug(f"Count of recent text requests retrieved for channel {discord_id}.")
+    return row['count'] if row else 0
+
 def deactivate_old_messages(discord_id: int, vendor_name: str, window: int) -> None:
     """
     Sets all messages outside of the current window to inactive. This is used to prevent the AI from using outdated context.
@@ -249,3 +284,47 @@ def clear_messages(discord_id: int, vendor_name: str) -> None:
     logging.debug(f"Clearing messages for channel {discord_id} and vendor {vendor_name}...")
     delete_channel_messages(discord_id, vendor_name)
     logging.debug(f"Messages cleared for channel {discord_id} and vendor {vendor_name}.")
+
+
+### MISCELLANEOUS METHODS ###
+async def enforce_text_rate_limits(channel_id: str) -> bool:
+    """
+    Enforce rate limits on text-based interactions to prevent abuse.
+
+    Parameters:
+    channel_id (str): The ID of the channel where the interaction occurred.
+
+    Returns:
+    bool: True if request is allowed, False if it exceeds the rate limit.
+    """
+    # Get a count of recent text requests made in this channel
+    request_count = get_count_recent_text_requests(channel_id)
+    rate_limit = int(getenv("ANTHROPIC_RATE_LIMIT"))
+
+    # If the rate limit is exceeded, return an error message and signal to short-circuit the command
+    if request_count < rate_limit:
+        return True
+    else:
+        logging.warning(f"Text request rate limit exceeded for channel {channel_id}.")
+        return False
+    
+async def enforce_image_rate_limits(channel_id: str) -> bool:
+    """
+    Enforce rate limits on image-based interactions to prevent abuse.
+
+    Parameters:
+    channel_id (str): The ID of the channel where the interaction occurred.
+
+    Returns:
+    bool: True if request is allowed, False if it exceeds the rate limit.
+    """
+    # Get a count of recent image requests made in this channel
+    request_count = get_count_recent_image_requests(channel_id)
+    rate_limit = int(getenv("FAL_RATE_LIMIT"))
+
+    # If the rate limit is exceeded, return an error message and signal to short-circuit the command
+    if request_count < rate_limit:
+        return True
+    else:
+        logging.warning(f"Image request limit exceeded for channel {channel_id}.")
+        return False

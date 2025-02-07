@@ -88,58 +88,68 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
     """
     await interaction.response.defer() # Defer to create a "thinking" spinner and avoid timeout
 
-    # Process any images attached to the prompt into a list of b64 encoded strings
-    images = []
-    if upload:
-        # Check if the upload is an image in a valid format
-        file_extension = upload.filename.split('.')[-1].lower()
-        if file_extension in ['png', 'jpg', 'jpeg']:
-            file_data = await upload.read()
-            image_b64 = base64.b64encode(file_data).decode('utf-8')
-            image_b64 = await ai.compress_image(image_b64) # Compress the image to reduce token count
+    # Check if channel is within or outside of prompt rate limits
+    within_rate_limit = await mem.enforce_text_rate_limits(interaction.channel.id)
 
-            # Update the filename to ".jpeg" since we use that format to reduce costs
-            filename_without_ext = upload.filename.rsplit('.', 1)[0]
-            new_filename = f"{filename_without_ext}.jpeg"
+    if within_rate_limit:
+        # Process any images attached to the prompt into a list of b64 encoded strings
+        images = []
+        if upload:
+            # Check if the upload is an image in a valid format
+            file_extension = upload.filename.split('.')[-1].lower()
+            if file_extension in ['png', 'jpg', 'jpeg']:
+                file_data = await upload.read()
+                image_b64 = base64.b64encode(file_data).decode('utf-8')
+                image_b64 = await ai.compress_image(image_b64) # Compress the image to reduce token count
 
-            images.append({ "filename": new_filename, "image": image_b64 })
-            image_file = await upload.to_file() # Since slash commands don't display attachments by default, the bot will re-upload them.
-    str_images = json.dumps(images)
+                # Update the filename to ".jpeg" since we use that format to reduce costs
+                filename_without_ext = upload.filename.rsplit('.', 1)[0]
+                new_filename = f"{filename_without_ext}.jpeg"
 
-    # Create the origin channel if it doesn't exist in the DB, then add the prompt message
-    mem.create_channel(interaction.channel.id)
-    # Include images if required - image uploads are optional when calling this command
-    if images:
-        mem.add_message_with_images(interaction.channel.id, 'Anthropic', 'prompt', False, prompt, str_images)
+                images.append({ "filename": new_filename, "image": image_b64 })
+                image_file = await upload.to_file() # Since slash commands don't display attachments by default, the bot will re-upload them.
+        str_images = json.dumps(images)
+
+        # Create the origin channel if it doesn't exist in the DB, then add the prompt message
+        mem.create_channel(interaction.channel.id)
+        # Include images if required - image uploads are optional when calling this command
+        if images:
+            mem.add_message_with_images(interaction.channel.id, 'Anthropic', 'prompt', False, prompt, str_images)
+        else:
+            mem.add_message(interaction.channel.id, 'Anthropic', 'prompt', False, prompt)
+
+        # Get messages used as context for the prompt
+        context = mem.get_visible_messages(interaction.channel.id, 'All Models')
+
+        # Determine if we need to deactivate old messages
+        deactivate_old_messages = False
+        if len(context) >= mem.WINDOW:
+            deactivate_old_messages = True # Use this to notify user that old messages were pruned
+            mem.deactivate_old_messages(interaction.channel.id, 'All Models', mem.WINDOW)
+        
+        # Get the AI response and record it in the database
+        response = await ai.prompt('Anthropic', 'prompt', prompt, context)
+        mem.add_message(interaction.channel.id, 'Anthropic', "assistant", False, response)
+        
+        # Build the response message for Discord
+        message = ""
+        if deactivate_old_messages:
+            message += "> `Note`: Some older messages were removed from context. Use `/clear` to reset the bot!\n"
+        message += f'`Prompt:` {prompt}\n\n`Response:` {response}'
+
+        if len(message) > 2000:
+            message = message[:1975] + "--[response too long]--" # Discord has a 2000 character limit for messages
+
+        # Update the deferred message with the AI's response. Only include a file upload if required.
+        if images:
+            await interaction.followup.send(content=message, file=image_file)
+        else:
+            await interaction.followup.send(content=message)
     else:
-        mem.add_message(interaction.channel.id, 'Anthropic', 'prompt', False, prompt)
-
-    # Get messages used as context for the prompt
-    context = mem.get_visible_messages(interaction.channel.id, 'All Models')
-
-    # Determine if we need to deactivate old messages
-    deactivate_old_messages = False
-    if len(context) >= mem.WINDOW:
-        deactivate_old_messages = True # Use this to notify user that old messages were pruned
-        mem.deactivate_old_messages(interaction.channel.id, 'All Models', mem.WINDOW)
-    
-    # Get the AI response and record it in the database
-    response = await ai.prompt('Anthropic', 'prompt', prompt, context)
-    mem.add_message(interaction.channel.id, 'Anthropic', "assistant", False, response)
-    
-    # Build the response message for Discord
-    message = ""
-    if deactivate_old_messages:
-        message += "> `Note`: Some older messages were removed from context. Use `/clear` to reset the bot!\n"
-    message += f'`Prompt:` {prompt}\n\n`Response:` {response}'
-
-    if len(message) > 2000:
-        message = message[:1975] + "--[response too long]--" # Discord has a 2000 character limit for messages
-
-    # Update the deferred message with the AI's response. Only include a file upload if required.
-    if images:
-        await interaction.followup.send(content=message, file=image_file)
-    else:
+        # If the channel is outside of the rate limit, tell users to chill tf out
+        message = ""
+        message += f"`Error`: You're sending too many prompts and have been rate-limited. The bot can handle a maximum of {getenv('ANTHROPIC_RATE_LIMIT')} `/prompt` requests per hour. Please wait a few minutes before sending more prompts."
+        message += f'\n\n`Prompt:` {prompt}'
         await interaction.followup.send(content=message)
 
 @client.tree.command()
@@ -153,23 +163,33 @@ async def create_image(interaction: discord.Interaction, prompt: str):
     """
     await interaction.response.defer() # Defer to create a "thinking" spinner and avoid timeout
 
-    # Create the origin channel if it doesn't exist in the DB, then add the prompt message
-    mem.create_channel(interaction.channel.id)
-    mem.add_message(interaction.channel.id, 'Fal.AI', 'prompt', True, prompt)
+    # Check if channel is within or outside of prompt rate limits
+    within_rate_limit = await mem.enforce_image_rate_limits(interaction.channel.id)
 
-    # Get the AI response and record it in the database. For images, a placeholder is used in place of a message.
-    response = await ai.create_image(prompt)
-    image_data = await ai.image_strip_headers(response["image"]["url"], "jpeg")
-    image_data = await ai.compress_image(image_data) # Compress the image to reduce token count
-    str_image = json.dumps([{ "filename": "image.jpeg", "image": image_data }])
-    # Dear reader, I am so sorry for this. But Anthropic's API freaks the fuck out if you specify that a bot, rather than a user, uploaded an image as context.
-    mem.add_message_with_images(interaction.channel.id, 'Fal.AI', "prompt", False, "Image", str_image)
-    
-    # Format the image response as a Discord file object
-    output_file = await ai.format_image_response(image_data, "jpeg", response["has_nsfw_concepts"]) # Fal.AI returns jpeg-format image files
-    
-    # Update the deferred message with the prompt text and the image file attached
-    await interaction.followup.send(content=f'`Prompt:` {prompt}\n\n`Response:`', file=output_file)
+    if within_rate_limit:
+        # Create the origin channel if it doesn't exist in the DB, then add the prompt message
+        mem.create_channel(interaction.channel.id)
+        mem.add_message(interaction.channel.id, 'Fal.AI', 'prompt', True, prompt)
+
+        # Get the AI response and record it in the database. For images, a placeholder is used in place of a message.
+        response = await ai.create_image(prompt)
+        image_data = await ai.image_strip_headers(response["image"]["url"], "jpeg")
+        image_data = await ai.compress_image(image_data) # Compress the image to reduce token count
+        str_image = json.dumps([{ "filename": "image.jpeg", "image": image_data }])
+        # Dear reader, I am so sorry for this. But Anthropic's API freaks the fuck out if you specify that a bot, rather than a user, uploaded an image as context.
+        mem.add_message_with_images(interaction.channel.id, 'Fal.AI', "prompt", False, "Image", str_image)
+        
+        # Format the image response as a Discord file object
+        output_file = await ai.format_image_response(image_data, "jpeg", response["has_nsfw_concepts"]) # Fal.AI returns jpeg-format image files
+        
+        # Update the deferred message with the prompt text and the image file attached
+        await interaction.followup.send(content=f'`Prompt:` {prompt}\n\n`Response:`', file=output_file)
+    else:
+        # If the channel is outside of the rate limit, tell users to chill tf out
+        message = ""
+        message += f"`Error`: You're requesting too many images and have been rate-limited. The bot can handle a maximum of {getenv('FAL_RATE_LIMIT')} `/create_image` requests per hour. Please wait a few minutes before sending more requests."
+        message += f'\n\n`Prompt:` {prompt}'
+        await interaction.followup.send(content=message)
 
 @client.tree.command()
 @app_commands.describe(prompt='Description of the personality of the AI')

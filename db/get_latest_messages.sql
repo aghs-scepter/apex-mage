@@ -1,4 +1,5 @@
 SELECT
+    channel_messages.channel_message_id,
     message_type,
     message_data,
     message_images,

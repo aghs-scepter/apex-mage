@@ -149,11 +149,16 @@ async def format_prompt_anthropic(prompt_type: str, prompt: str, context) -> tup
     logging.debug(f"Prompt: {prompt}")
     logging.debug(f"Context: {context}")
     formatted_prompt = []
+    messages_with_recent_images = []
+    image_context_size = getenv("IMAGE_CONTEXT_SIZE")
     
     # Fetch the most recent system prompt from context if it exists, otherwise use default
     system_prompt = "You are an informational kiosk-like bot in an environment in which users have relatively short attention spans. You offer concise responses to prompts, offering detailed explanations only when necessary in response to follow-up questions on the same topic. Try to keep responses limited to 150 words or less unless providing code or technical documentation responses, avoid using bulleted or numbered lists, and use Discord message syntax when responding. Remember: Standard markdown syntax will NOT work in Discord, you must use Discord's own message syntax. Do not use emojis unless specifically prompted to include them."
     if context:
         for row in reversed(context):
+            if row["message_images"] != "[]":
+                if len(messages_with_recent_images) < image_context_size:
+                    messages_with_recent_images.append(row["channel_message_id"])
             if row["message_type"] == "behavior":
                 system_prompt = row["message_data"]
                 break
@@ -168,8 +173,8 @@ async def format_prompt_anthropic(prompt_type: str, prompt: str, context) -> tup
                 # Start building the content for the prompt
                 prompt_content = []
 
-                # If the message contains images, add them to the prompt
-                if row["message_images"] != "[]":
+                # If the message contains recent images, add them to the prompt
+                if row["channel_message_id"] in messages_with_recent_images:
                     images = json.loads(row["message_images"])
                     for idx, image in enumerate(images):
                         file_extension = image["filename"].split(".")[-1]
@@ -177,9 +182,9 @@ async def format_prompt_anthropic(prompt_type: str, prompt: str, context) -> tup
                         media = {"type": "image", "source": {"type": "base64", "media_type": f"image/{file_extension}", "data": image["image"]}}
                         prompt_content.append(media_label)
                         prompt_content.append(media)
-                
-                # Add the text content of the message to the prompt
-                prompt_content.append({ "type": "text", "text": row["message_data"] })
+                else:
+                    # Add the text content of the message to the prompt
+                    prompt_content.append({ "type": "text", "text": row["message_data"] })
 
                 # Construct the final prompt for the API
                 contextual_prompt = { "role": interaction_type, "content": prompt_content }
@@ -260,8 +265,6 @@ async def compress_image(image_data_b64: str, max_size=(512, 512), quality=75) -
     compressed_image_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
     
     return compressed_image_b64
-
-
 
 async def format_image_response(image_data_b64: str, file_extension: str, nsfw: bool) -> str:
     """
