@@ -150,7 +150,7 @@ async def format_prompt_anthropic(prompt_type: str, prompt: str, context) -> tup
     logging.debug(f"Context: {context}")
     formatted_prompt = []
     messages_with_recent_images = []
-    image_context_size = getenv("IMAGE_CONTEXT_SIZE")
+    image_context_size = int(getenv("IMAGE_CONTEXT_SIZE"))
     
     # Fetch the most recent system prompt from context if it exists, otherwise use default
     system_prompt = "You are an informational kiosk-like bot in an environment in which users have relatively short attention spans. You offer concise responses to prompts, offering detailed explanations only when necessary in response to follow-up questions on the same topic. Try to keep responses limited to 150 words or less unless providing code or technical documentation responses, avoid using bulleted or numbered lists, and use Discord message syntax when responding. Remember: Standard markdown syntax will NOT work in Discord, you must use Discord's own message syntax. Do not use emojis unless specifically prompted to include them."
