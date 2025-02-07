@@ -79,7 +79,7 @@ FAL_RATE_LIMIT=$FAL_RATE_LIMIT
 IMAGE_CONTEXT_SIZE=$IMAGE_CONTEXT_SIZE
 EOF
 
-echo "Your API keys and settings have been saved to /app/.env. You can run `update-keys.sh` to update these keys and settings at any time."
+echo "Your API keys and settings have been saved to /app/.env. You can run update-keys.sh to update these keys and settings at any time."
 echo "Press any key to continue."
 read -n1 -s
 echo ""
