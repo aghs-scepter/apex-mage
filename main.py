@@ -40,7 +40,6 @@ class DiscordAiClient(discord.Client):
         Parameters:
         guild (discord.Guild): The guild to register commands for.
         """
-        self.tree.copy_global_to(guild=guild)
         await self.tree.sync(guild=guild)
         await self.change_presence(activity=discord.CustomActivity(name="/help for commands"))
         print(f"Registered commands for guild: {guild.name} (ID: {guild.id})")
