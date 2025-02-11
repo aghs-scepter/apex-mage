@@ -348,7 +348,7 @@ async def format_latest_images_list(image_rows: list) -> List[dict]:
     image_files = []
 
     # Iterate through the image rows and create a Discord file object for each image
-    for index, row in enumerate(image_rows):
+    for index, row in enumerate(reversed(image_rows)): # Query returns reverse-chronological; Reverse here to get chronological order
         image_message_id = row["channel_message_id"]
         image_data = json.loads(row["message_images"])[0]["image"]
         image_files.append({

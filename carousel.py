@@ -104,7 +104,7 @@ class ImageCarouselView(discord.ui.View):
         self.embed = None
         self.files = files
         self.embed_image = None
-        self.current_index = 0
+        self.current_index = (len(self.files) - 1) if self.files else 0 # start at the end (latest) image
         self.healthy = False # Default to unhealthy so weird states don't try to render as embeds
         
         # If images are provided, default to showing the first in the list when initialized
@@ -157,6 +157,19 @@ class ImageCarouselView(discord.ui.View):
             return user["name"], user["pfp"]
         else:
             return "System", "https://github.com/aghs-scepter/apex-mage/raw/main/assets/default_pfp.png"
+    
+    def generate_image_chrono_bar(self, current_index: int, total: int) -> str:
+        """
+        Generate a visual description for an image's relative position in context of the carousel
+        """
+        bar_icons = ""
+        for i in range(0, total):
+            if i == current_index:
+                bar_icons += "⬥"
+            else:
+                bar_icons += "⬦"
+        
+        return f"(Oldest) {bar_icons} (Newest)"
     
     async def create_error_embed(self, interaction, error_message):
         """
@@ -222,7 +235,7 @@ class ImageCarouselView(discord.ui.View):
         """
         embed_image = await create_file_from_image(self.files[self.current_index])
 
-        embed = discord.Embed(description=f"Image {self.current_index + 1}/{len(self.files)}")
+        embed = discord.Embed(description=self.generate_image_chrono_bar(self.current_index, len(self.files)))
         embed.set_author(name=f'{self.username} (via Apex Mage)', url="https://github.com/aghs-scepter/apex-mage", icon_url=self.pfp)
         embed.set_image(url=f"attachment://{embed_image.filename}")
 
@@ -258,7 +271,7 @@ class ImageCarouselView(discord.ui.View):
         self.embed_image = await create_file_from_image(self.files[self.current_index])
 
         # Update embed description and attachment URL
-        self.embed.description = f"Image {self.current_index + 1}/{len(self.files)}"
+        self.embed.description = self.generate_image_chrono_bar(self.current_index, len(self.files))
         self.embed.set_image(url=f"attachment://{self.embed_image.filename}")
        
         # Update button states
