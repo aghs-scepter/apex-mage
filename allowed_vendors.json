@@ -3,6 +3,9 @@
         "model": "claude-3-5-sonnet-20241022"
     },
     "Fal.AI": {
-        "model": "fal-ai/flux-pro/v1.1-ultra"
+        "model": {
+            "create": "fal-ai/flux-pro/v1.1-ultra",
+            "modify": "fal-ai/flux-pro/v1/canny"
+        }
     }
 }

@@ -6,6 +6,7 @@ import json
 import io
 import logging
 from PIL import Image
+from typing import List
 from os import getenv
 from uuid import uuid4
 from anthropic import Anthropic
@@ -29,6 +30,28 @@ async def create_clients():
 
 # Initialize the Anthropic client. We run it in an asyncio event loop to avoid blocking the main thread.
 anthropic_client = asyncio.run(create_clients())
+
+async def upload_image_falai(image_data: str, filename: str) -> str:
+    """
+    Upload an image to Fal.AI for use in image generation or modification.
+
+    Parameters:
+    image_data (str): The base64-encoded image data.
+    filename (str): The filename of the image.
+
+    Returns:
+    str: The URL of the uploaded image.
+    """
+    logging.debug(f"Uploading image to Fal.AI...")
+
+    response = fal_client.upload(
+        data=image_data,
+        content_type="jpeg",
+        file_name=filename
+    )
+
+    logging.debug(f"Image uploaded.")
+    return response
 
 async def create_image(prompt: str) -> str:
     """
@@ -59,7 +82,7 @@ async def create_image(prompt: str) -> str:
         dict: The result from the Fal.AI client once the image is generated.
         """
         return fal_client.subscribe(
-            application=models["Fal.AI"]["model"],
+            application=models["Fal.AI"]["model"]["create"],
             arguments={ "prompt": prompt , "enable_safety_checker": False, "sync_mode": True, "safety_tolerance": 5 },
             with_logs=True,
             on_queue_update=on_queue_update
@@ -70,6 +93,51 @@ async def create_image(prompt: str) -> str:
 
     output = { "image": result["images"][0], "filename": "image.jpeg", "has_nsfw_concepts": result["has_nsfw_concepts"][0] }
     logging.debug(f"Image generated.")
+    return output
+
+async def modify_image(image_data: str, prompt: str) -> str:
+    """
+    Modify an image based on the given prompt using Fal.AI's API.
+
+    Parameters:
+    image_data (str): The base64-encoded image data.
+    prompt (str): The prompt used to modify the image.
+
+    Returns:
+    dict: A dictionary containing the modified image URL and an indicator of whether the image contains NSFW content.
+    """
+    logging.debug(f"Generating image for prompt: {prompt}")
+
+    image_url = await upload_image_falai(io.BytesIO(base64.b64decode(image_data)), "image.jpeg")
+
+    def on_queue_update(update):
+        """
+        Callback function to handle queue updates
+
+        Parameters:
+        update: The update information from the Fal.AI queue.
+        """
+        logging.debug(f"Still in queue...")
+
+    def subscribe_to_fal_client():
+        """
+        Subscribe to the Fal.AI client to modify an image. Fal.AI enforces a queue so we need to wait a variable amount of time for the image to be generated.
+
+        Returns:
+        dict: The result from the Fal.AI client once the image is generated.
+        """
+        return fal_client.subscribe(
+            application=models["Fal.AI"]["model"]["modify"],
+            arguments={ "control_image_url": image_url, "prompt": prompt , "num_inference_steps": 28, "guidance_scale": 7.5, "enable_safety_checker": False, "sync_mode": True, "safety_tolerance": 5 },
+            with_logs=True,
+            on_queue_update=on_queue_update
+        )
+    
+    # Run the Fal.AI subscription in a separate thread to avoid blocking the main thread
+    result = await asyncio.to_thread(subscribe_to_fal_client)
+
+    output = { "image": result["images"][0], "filename": "image.jpeg", "has_nsfw_concepts": result["has_nsfw_concepts"][0] }
+    logging.debug(f"Image modified.")
     return output
 
 async def prompt(vendor: str, prompt_type: str, prompt: str, context) -> str:
@@ -266,6 +334,31 @@ async def compress_image(image_data_b64: str, max_size=(512, 512), quality=75) -
     
     return compressed_image_b64
 
+async def format_latest_images_list(image_rows: list) -> List[dict]:
+    """
+    Format image contents of the rows into a list of Discord file objects.
+
+    Parameters:
+    image_rows (list): A list of rows containing image data.
+
+    Returns:
+    List[discord.File]: A list of Discord file objects containing the images.
+    """
+    logging.debug(f"Formatting image list...")
+    image_files = []
+
+    # Iterate through the image rows and create a Discord file object for each image
+    for index, row in enumerate(image_rows):
+        image_message_id = row["channel_message_id"]
+        image_data = json.loads(row["message_images"])[0]["image"]
+        image_files.append({
+                "message_id": image_message_id,
+                "filename": f"image_{index + 1}.jpeg",
+                "image": image_data
+        })
+
+    return image_files
+
 async def format_image_response(image_data_b64: str, file_extension: str, nsfw: bool) -> str:
     """
     Convert the raw image response from Fal.AI to a Discord file object that can be attached to a message.
@@ -286,4 +379,63 @@ async def format_image_response(image_data_b64: str, file_extension: str, nsfw: 
     else:
         output_filename = f"{uuid4()}.jpeg"
     
-    return discord.File(image_file, filename=output_filename)
+    return output_filename, discord.File(image_file, filename=output_filename)
+
+async def generate_embed(user: str, prompt: str, response: str, note: str = None, error: str = None, inline: bool = True, filename: str = None) -> discord.Embed:
+    """
+    Generate an embed to display results of a bot slash command.
+
+    Returns:
+    discord.Embed: An embed containing the prompt and response, including image if one is provided.
+    """
+    embed = discord.Embed()
+
+    # Setting author info to link to the bot's GitHub repository
+    embed.set_author(name=f'{user["name"]} (via Apex Mage)', url="https://github.com/aghs-scepter/apex-mage", icon_url=f'{user["pfp"]}')
+
+    # If an image was provided, add it to the embed
+    if filename:
+        embed.set_image(url=f"attachment://{filename}")
+
+    # Add bot notes, e.g. context truncations and reminders
+    if note:
+        embed.add_field(name="Note", value=note, inline=False) # Notes are always inline=False
+
+    # If no error message is provided, include the prompt and response fields
+    if not error:
+        embed.color = 0x1CBFA1
+        embed.add_field(name="Prompt", value=prompt, inline=inline)
+        embed.add_field(name="Response", value=response, inline=inline)
+
+    # If this is an error message, ignore the response field and include an error section instead.
+    else:
+        embed.color = 0xE91515
+        embed.add_field(name="Prompt", value=prompt, inline=False) # Error messages are always inline=False
+        embed.add_field(name="!! Error !!", value=error, inline=False)
+    
+    return embed
+
+async def generate_embed_informational(user: str, note_title: str, note: str, error: str = None) -> discord.Embed:
+    """
+    Generate an embed to display results of a bot slash command.
+
+    Returns:
+    discord.Embed: An embed containing the prompt and response, including image if one is provided.
+    """
+    embed = discord.Embed()
+
+    # Setting author info to link to the bot's GitHub repository
+    embed.set_author(name=f'{user["name"]} (via Apex Mage)', url="https://github.com/aghs-scepter/apex-mage", icon_url=f'{user["pfp"]}')
+
+    # Add bot notes, e.g. context truncations and reminders
+    # If no error message is provided, display the note
+    if not error:
+        embed.color = 0x1CBFA1
+        embed.add_field(name=note_title, value=note, inline=False)
+    
+    else:
+        embed.color = 0xE91515
+        embed.add_field(name="!! Error !!", value=error, inline=False)
+    
+    return embed
+    

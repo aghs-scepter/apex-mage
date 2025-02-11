@@ -163,6 +163,25 @@ def get_latest_messages(discord_id: int, vendor_name: str, limit: int) -> List[D
     logging.debug(f"Latest messages retrieved for channel {discord_id} and vendor {vendor_name}.")
     return [row_to_dict(row) for row in rows]
 
+def get_latest_images(discord_id: int, vendor_name: str, limit: int) -> List[Dict[str, Any]]:
+    """
+    Gets the latest image messages for a given channel and vendor. This is used to provide context to the AI model.
+
+    Parameters:
+    discord_id (int): The Discord ID of the channel to retrieve messages for.
+    vendor_name (str): The name of the vendor to retrieve messages for.
+    limit (int): The maximum number of messages to retrieve.
+
+    Returns:
+    List[Dict[str, Any]]: A list of the latest image messages for the channel and vendor in chronological order.
+    """
+    logging.debug(f"Getting latest image messages for channel {discord_id} and vendor {vendor_name}...")
+    query = open('db/get_latest_images.sql').read()
+    cursor = db.execute(query, (discord_id,vendor_name,vendor_name,limit,))
+    rows = cursor.fetchall()
+    logging.debug(f"Latest image messages retrieved for channel {discord_id} and vendor {vendor_name}.")
+    return [row_to_dict(row) for row in rows]
+
 def get_visible_messages(discord_id: int, vendor_name: str) -> List[Dict[str, Any]]:
     """
     Gets all messages for a given channel and vendor. This is used to provide context to the AI model or for auditing.

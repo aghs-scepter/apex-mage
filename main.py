@@ -7,6 +7,7 @@ import logging
 from discord import app_commands
 import ai
 import mem
+import carousel as carousel
 
 class DiscordAiClient(discord.Client):
     """
@@ -29,6 +30,7 @@ class DiscordAiClient(discord.Client):
         """
         Synchronizes the command tree with Discord.
         """
+        # Check if commands are already registered
         await self.tree.sync()
     
     async def register_commands(self, guild: discord.Guild):
@@ -40,6 +42,7 @@ class DiscordAiClient(discord.Client):
         """
         self.tree.copy_global_to(guild=guild)
         await self.tree.sync(guild=guild)
+        await self.change_presence(activity=discord.CustomActivity(name="/help for commands"))
         print(f"Registered commands for guild: {guild.name} (ID: {guild.id})")
 
     async def on_guild_join(self, guild: discord.Guild):
@@ -71,14 +74,31 @@ async def help(interaction: discord.Interaction):
     """
     Display a help message with available commands.
     """
-    await interaction.response.send_message(
-        content="**Available Commands:**\n"
-                "`/prompt` - Submit a prompt and get a text response. You can optionally include an image attachment.\n"
-                "`/create_image` - Submit an image generation request to the AI.\n"
-                "`/behavior` - Alter the behavior and personality of the text AI.\n"
-                "`/clear` - Clear the bot's context for the current channel. It will forget everything, starting a new conversation with default behavior."
-                "`/help` - Display this message."
-    )
+    await interaction.response.defer() # Defer to create a "thinking" spinner and avoid timeout
+
+    # Create the user slug for decorating the result embed
+    embed_user = {
+        "name": interaction.user.display_name,
+        "pfp": interaction.user.avatar
+    }
+
+    note = """
+    You can interact with the bot using the following commands:
+
+    **`/prompt`** - Submit a prompt and get a text response. You can optionally include an image.
+
+    **`/create_image`** - Generate an image using the AI.
+
+    **`/behavior`** - Alter the behavior and personality of the text AI.
+
+    **`/clear`** - Clear the bot's memory for the current channel. It will forget everything, starting a new conversation with default behavior.
+    
+    **`/help`** - Display this message.
+
+    If you need help or have questions, please contact `@aghs` on Discord.
+    """
+    embed = await ai.generate_embed_informational(user=embed_user, note_title="/help", note=note)
+    await interaction.followup.send(embed=embed)
 
 @client.tree.command()
 @app_commands.describe(prompt='Prompt for the AI to respond to')
@@ -87,6 +107,12 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
     Submit a prompt to the AI and receive a response.
     """
     await interaction.response.defer() # Defer to create a "thinking" spinner and avoid timeout
+
+    # Create the user slug for decorating the result embed
+    embed_user = {
+        "name": interaction.user.display_name,
+        "pfp": interaction.user.avatar
+    }
 
     # Check if channel is within or outside of prompt rate limits
     within_rate_limit = await mem.enforce_text_rate_limits(interaction.channel.id)
@@ -131,26 +157,25 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
         response = await ai.prompt('Anthropic', 'prompt', prompt, context)
         mem.add_message(interaction.channel.id, 'Anthropic', "assistant", False, response)
         
-        # Build the response message for Discord
-        message = ""
+        # If old messages needed to be deactivated, notify the user
         if deactivate_old_messages:
-            message += "> `Note`: Some older messages were removed from context. Use `/clear` to reset the bot!\n"
-        message += f'`Prompt:` {prompt}\n\n`Response:` {response}'
+            note = ">Some older messages were removed from context. Use `/clear` to reset the bot!"
 
-        if len(message) > 2000:
-            message = message[:1975] + "--[response too long]--" # Discord has a 2000 character limit for messages
+        if len(response) > 1024:
+            response = response[:1000] + "--[response too long]--" # Discord has a 1024 character limit for embed field values
 
         # Update the deferred message with the AI's response. Only include a file upload if required.
         if images:
-            await interaction.followup.send(content=message, file=image_file)
+            embed = await ai.generate_embed(user=embed_user, prompt=prompt,response=response, inline=False, filename=image_file.filename)
+            await interaction.followup.send(embed=embed, file=image_file)
         else:
-            await interaction.followup.send(content=message)
+            embed = await ai.generate_embed(user=embed_user, prompt=prompt,response=response, inline=False)
+            await interaction.followup.send(embed=embed)
     else:
         # If the channel is outside of the rate limit, tell users to chill tf out
-        message = ""
-        message += f"`Error`: You're sending too many prompts and have been rate-limited. The bot can handle a maximum of {getenv('ANTHROPIC_RATE_LIMIT')} `/prompt` requests per hour. Please wait a few minutes before sending more prompts."
-        message += f'\n\n`Prompt:` {prompt}'
-        await interaction.followup.send(content=message)
+        error = f"You're sending too many prompts and have been rate-limited. The bot can handle a maximum of {getenv('ANTHROPIC_RATE_LIMIT')} `/prompt` requests per hour. Please wait a few minutes before sending more prompts."
+        embed = await ai.generate_embed(user=embed_user, prompt=prompt,response="Error",error=error,inline=False)
+        await interaction.followup.send(embed=embed)
 
 @client.tree.command()
 @app_commands.describe(prompt='Description of the image you want to generate')
@@ -162,6 +187,12 @@ async def create_image(interaction: discord.Interaction, prompt: str):
     prompt (str): The prompt for the AI.
     """
     await interaction.response.defer() # Defer to create a "thinking" spinner and avoid timeout
+
+    # Create the user slug for decorating the result embed
+    embed_user = {
+        "name": interaction.user.display_name,
+        "pfp": interaction.user.avatar
+    }
 
     # Check if channel is within or outside of prompt rate limits
     within_rate_limit = await mem.enforce_image_rate_limits(interaction.channel.id)
@@ -180,16 +211,17 @@ async def create_image(interaction: discord.Interaction, prompt: str):
         mem.add_message_with_images(interaction.channel.id, 'Fal.AI', "prompt", False, "Image", str_image)
         
         # Format the image response as a Discord file object
-        output_file = await ai.format_image_response(image_data, "jpeg", response["has_nsfw_concepts"]) # Fal.AI returns jpeg-format image files
+        output_filename, output_file = await ai.format_image_response(image_data, "jpeg", response["has_nsfw_concepts"]) # Fal.AI returns jpeg-format image files
         
         # Update the deferred message with the prompt text and the image file attached
-        await interaction.followup.send(content=f'`Prompt:` {prompt}\n\n`Response:`', file=output_file)
+        embed = await ai.generate_embed(user=embed_user, prompt=prompt,response="Generated image", inline=False, filename=output_filename)
+
+        await interaction.followup.send(file=output_file, embed=embed)
     else:
         # If the channel is outside of the rate limit, tell users to chill tf out
-        message = ""
-        message += f"`Error`: You're requesting too many images and have been rate-limited. The bot can handle a maximum of {getenv('FAL_RATE_LIMIT')} `/create_image` requests per hour. Please wait a few minutes before sending more requests."
-        message += f'\n\n`Prompt:` {prompt}'
-        await interaction.followup.send(content=message)
+        error = f"You're requesting too many images and have been rate-limited. The bot can handle a maximum of {getenv('FAL_RATE_LIMIT')} `/create_image` requests per hour. Please wait a few minutes before sending more requests."
+        embed = await ai.generate_embed(user=embed_user, prompt=prompt,response="Error",error=error,inline=False)
+        await interaction.followup.send(embed=embed)
 
 @client.tree.command()
 @app_commands.describe(prompt='Description of the personality of the AI')
@@ -201,6 +233,12 @@ async def behavior(interaction: discord.Interaction, prompt: str):
     prompt (str): The behavior change prompt to submit.
     """
     await interaction.response.defer() # Defer to create a "thinking" spinner and avoid timeout
+
+    # Create the user slug for decorating the result embed
+    embed_user = {
+        "name": interaction.user.display_name,
+        "pfp": interaction.user.avatar
+    }
 
     # Create the origin channel if it doesn't exist in the DB, then add the prompt message
     mem.create_channel(interaction.channel.id)
@@ -214,8 +252,8 @@ async def behavior(interaction: discord.Interaction, prompt: str):
     mem.add_message(interaction.channel.id, 'Anthropic', "assistant", False, response)
 
     # Update the deferred message with the prompt text and acknowledgement of the behavior change
-    message = f'`Behavior Update:` {prompt}\n\n`Response:` New behavior set.'
-    await interaction.followup.send(content=message)
+    embed = await ai.generate_embed(user=embed_user, prompt=prompt,response="New behavior set.", inline=False)
+    await interaction.followup.send(embed=embed)
 
 @client.tree.command()
 @app_commands.describe()
@@ -223,9 +261,47 @@ async def clear(interaction: discord.Interaction):
     """
     Clear the bot's context for the current channel, starting with empty context and default behavior.
     """
+    await interaction.response.defer() # Defer to create a "thinking" spinner and avoid timeout
+
+    # Create the user slug for decorating the result embed
+    embed_user = {
+        "name": interaction.user.display_name,
+        "pfp": interaction.user.avatar
+    }
+
+    # Create the origin channel if it doesn't exist in the DB, then clear any existing context
     mem.create_channel(interaction.channel.id)
     mem.clear_messages(interaction.channel.id, 'All Models')
-    await interaction.response.send_message(f'History cleared. The bot has forgotten previous messages and has been reset to default behavior.')
+
+    # Update the deferred message with a confirmation that the bot's context has been cleared
+    note = "History cleared. The bot has forgotten previous messages and has been reset to default behavior."
+    embed = await ai.generate_embed_informational(user=embed_user, note_title="/clear", note=note)
+    await interaction.followup.send(embed=embed)
+
+@client.tree.command()
+@app_commands.describe()
+async def modify_image(interaction: discord.Interaction):
+    """
+    Select a recent image to modify using the AI.
+
+    Parameters:
+    interaction (discord.Interaction): The interaction object for the command.
+    """
+    await interaction.response.defer() # Defer to create a "thinking" spinner and avoid timeout
+    
+    # Create the user slug for decorating the result embed
+    user = {
+        "name": interaction.user.display_name,
+        "pfp": interaction.user.avatar
+    }
+
+    # Get the latest images from the database and format them for the carousel view
+    latest_images = mem.get_latest_images(interaction.channel.id, "All Models", 5)
+    image_files = await ai.format_latest_images_list(latest_images)
+    
+    # Create the image carousel view and start the timeout countdown
+    view = carousel.ImageCarouselView(interaction=interaction, files=image_files, user=user)
+    await view.initialize(interaction)
 
 if __name__ == "__main__":
     client.run(getenv("DISCORD_BOT_TOKEN"))
