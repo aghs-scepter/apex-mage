@@ -68,8 +68,8 @@ class InfoEmbedView(discord.ui.View):
             embed_image = await create_file_from_image(self.image_data)
             self.embed.set_image(url=f"attachment://{embed_image.filename}")
 
-            if self.message:
-                await self.message.edit(
+            if interaction.original_response:
+                await interaction.edit_original_response(
                     embed=self.embed,
                     attachments=[embed_image]
                 )
@@ -79,8 +79,8 @@ class InfoEmbedView(discord.ui.View):
                     file=embed_image
                 )
         else:
-            if self.message:
-                await self.message.edit(
+            if interaction.original_response:
+                await interaction.edit_original_response(
                     attachments=[],
                     embed=self.embed
                 )
@@ -513,6 +513,7 @@ class ImageCarouselView(discord.ui.View):
         #await self.disable_embed(interaction)
         if self.on_select:
             self.hide_buttons()
+            await self.message.edit(view=self)
             await self.on_select(interaction, None)
 
 class ImageEditTypeView(discord.ui.View):

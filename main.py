@@ -88,7 +88,7 @@ async def help(interaction: discord.Interaction):
 
     ========================================
 
-    `/prompt` - Submit a prompt and get a text response. You can optionally choose to include an image.
+    `/prompt` - Submit a prompt and get a text response. You can include an image.
     `/create_image` - Generate an image using the AI.
     `/upload_image` - Upload an image to the bot.
     `/modify_image` - Modify an image using the AI.
@@ -316,6 +316,21 @@ async def create_image(interaction: discord.Interaction, prompt: str):
                 mem.create_channel(interaction.channel.id)
                 mem.add_message(interaction.channel.id, 'Fal.AI', 'prompt', True, prompt)
 
+                # Display a "processing" message while the image is being redrawn
+                processing_message = "Generating an image... (This may take up to 60 seconds)"
+                processing_notes = [
+                    {"name": "Prompt", "value": prompt}
+                ]
+                processing_view = carousel.InfoEmbedView(
+                    message=interaction.message,
+                    user=embed_user,
+                    title="Image generation in progress",
+                    description=processing_message,
+                    is_error=False,
+                    notes=processing_notes
+                )
+                await processing_view.initialize(interaction)
+
                 # Get the AI response and record it in the database. For images, a placeholder is used in place of a message.
                 response = await ai.create_image(prompt)
                 image_data = await ai.image_strip_headers(response["image"]["url"], "jpeg")
@@ -459,7 +474,7 @@ async def clear(interaction: discord.Interaction):
                 else:
                     # Update the deferred message with a confirmation that the bot's context has not been cleared
                     success_message = "Cancelled the `/clear` command. The bot's context remains unchanged."
-                    success_view = carousel.InfoEmbedView(message=interaction.message,user=user,title="Clear history cancelled",description=success_message,is_error=False,image_data=None)
+                    success_view = carousel.InfoEmbedView(message=interaction.message,user=user,title="Clear history cancelled",description=success_message,is_error=True,image_data=None)
                     await success_view.initialize(interaction)
         
         except asyncio.TimeoutError:
@@ -536,7 +551,7 @@ async def modify_image(interaction: discord.Interaction):
 
     if type_selection == "Cancel":
         # If the user cancels the image selection, display a message and exit.
-        edit_view = carousel.InfoEmbedView(message=original_message,user=user,title="Image modification cancelled",description="Cancelled the `/modify_image` command. No image was selected.",is_error=False,image_data=None)
+        edit_view = carousel.InfoEmbedView(message=original_message,user=user,title="Image modification cancelled",description="Cancelled the `/modify_image` command. No image was selected.",is_error=True,image_data=None)
         await edit_view.initialize(interaction)
         return
     
@@ -574,7 +589,7 @@ async def modify_image(interaction: discord.Interaction):
             image_selection = await asyncio.wait_for(image_selection_result, timeout=120.0)
             if not image_selection:
                 info_message = "Request cancelled by a user. No image was modified."
-                info_view = carousel.InfoEmbedView(message=original_message,user=user,title="Image modification cancelled",description=info_message,is_error=False,image_data=None)
+                info_view = carousel.InfoEmbedView(message=original_message,user=user,title="Image modification cancelled",description=info_message,is_error=True,image_data=None)
                 await info_view.initialize(interaction)
                 return
         
@@ -608,7 +623,7 @@ async def modify_image(interaction: discord.Interaction):
     if edit_type["edit_type"] == "Cancel":
         # If the user cancels the image modification, display a message and exit.
         info_message = "Request cancelled by a user. No image was modified."
-        info_view = carousel.InfoEmbedView(message=original_message,user=user,title="Image modification cancelled",description=info_message,is_error=False,image_data=None)
+        info_view = carousel.InfoEmbedView(message=original_message,user=user,title="Image modification cancelled",description=info_message,is_error=True,image_data=None)
         await info_view.initialize(interaction)
         return
     elif edit_type["edit_type"] in ("Adjust", "Redraw"):
