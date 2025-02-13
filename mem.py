@@ -182,6 +182,24 @@ def get_latest_images(discord_id: int, vendor_name: str, limit: int) -> List[Dic
     logging.debug(f"Latest image messages retrieved for channel {discord_id} and vendor {vendor_name}.")
     return [row_to_dict(row) for row in rows]
 
+def get_channel_latest_image_indicator(discord_id: int, vendor_name: str) -> bool:
+    """
+    Gets a boolean indicating whether at least one image exists in the channel's context.
+
+    Parameters:
+    discord_id (int): The Discord ID of the channel to retrieve messages for.
+    vendor_name (str): The name of the vendor to retrieve messages for.
+
+    Returns:
+    bool: True if at least one image exists in the channel's context, False otherwise.
+    """
+    logging.debug(f"Getting latest image indicator for channel {discord_id} and vendor {vendor_name}...")
+    query = open('db/get_channel_latest_image_indicator.sql').read()
+    cursor = db.execute(query, (discord_id,vendor_name,vendor_name,))
+    row = cursor.fetchone()
+    logging.debug(f"Latest image indicator retrieved for channel {discord_id} and vendor {vendor_name}.")
+    return True if row else False
+
 def get_visible_messages(discord_id: int, vendor_name: str) -> List[Dict[str, Any]]:
     """
     Gets all messages for a given channel and vendor. This is used to provide context to the AI model or for auditing.

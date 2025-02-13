@@ -95,7 +95,7 @@ async def create_image(prompt: str) -> str:
     logging.debug(f"Image generated.")
     return output
 
-async def modify_image(image_data: str, prompt: str) -> str:
+async def modify_image(image_data: str, prompt: str, guidance_scale: float) -> str:
     """
     Modify an image based on the given prompt using Fal.AI's API.
 
@@ -128,7 +128,7 @@ async def modify_image(image_data: str, prompt: str) -> str:
         """
         return fal_client.subscribe(
             application=models["Fal.AI"]["model"]["modify"],
-            arguments={ "control_image_url": image_url, "prompt": prompt , "num_inference_steps": 28, "guidance_scale": 7.5, "enable_safety_checker": False, "sync_mode": True, "safety_tolerance": 5 },
+            arguments={ "control_image_url": image_url, "prompt": prompt , "num_inference_steps": 28, "guidance_scale": guidance_scale, "enable_safety_checker": False, "sync_mode": True, "safety_tolerance": 5 },
             with_logs=True,
             on_queue_update=on_queue_update
         )
