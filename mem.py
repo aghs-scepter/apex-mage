@@ -288,7 +288,7 @@ def validate_vendors() -> None:
         with open("allowed_vendors.json") as file:
             allowed_vendors = json.load(file)
         for vendor_name in allowed_vendors.keys():
-            create_vendor(vendor_name, allowed_vendors[vendor_name]["model"])
+            create_vendor(vendor_name, json.dumps(allowed_vendors[vendor_name]["model"]))
     except FileNotFoundError:
         logging.error("allowed_vendors.json file not found.")
         raise ex
