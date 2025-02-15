@@ -755,9 +755,19 @@ class ImageEditPerformView(discord.ui.View):
             elif self.edit_type == "Redraw":
                 guidance_scale = 2.5
 
-            # Perform the image modification
-            response = await ai.modify_image(self.image_data["image"], prompt, guidance_scale)
+            if isinstance(self.image_data.get('image'), io.BytesIO):
+                self.image_data['image'].seek(0)
+                image_bytes = self.image_data['image'].read()
+                image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+            else:
+                image_b64 = self.image_data.get('image')
             
+            if not image_b64:
+                raise ValueError("No valid image data found")
+
+            # Perform the image modification
+            response = await ai.modify_image(image_b64, prompt, guidance_scale)
+
             # Process the response
             image_data = await ai.image_strip_headers(response["image"]["url"], "jpeg")
             image_data = await ai.compress_image(image_data)
