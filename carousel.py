@@ -748,9 +748,15 @@ class ImageEditPerformView(discord.ui.View):
                 if self.on_complete:
                     await self.on_complete(self.interaction, error_data)
                 return
+            
+            guidance_scale = 0.0
+            if self.edit_type == "Adjust":
+                guidance_scale = 10.0
+            elif self.edit_type == "Redraw":
+                guidance_scale = 1.5
 
             # Perform the image modification
-            response = await ai.modify_image(self.image_data["image"], prompt, guidance_scale=7.5)
+            response = await ai.modify_image(self.image_data["image"], prompt, guidance_scale=guidance_scale)
 
             # Process the response
             image_data = await ai.image_strip_headers(response["image"]["url"], "jpeg")
