@@ -380,15 +380,7 @@ class ImageCarouselView(discord.ui.View):
         """
         Returns the image file data of the image currently shown on the carousel.
         """
-        current_file_object = self.files[self.current_index]
-
-        # Get the raw bytes of the discord File
-        current_file_object.fp.seek(0) # File pointer to start
-        image_bytes = current_file_object.fp.read()
-        current_file_object.fp.seek(0) # Reset file pointer
-
-        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-        return { "filename": current_file_object.filename, "image": image_b64 }
+        return self.files[self.current_index]
     
     def disable_buttons(self):
         """
@@ -510,7 +502,7 @@ class ImageCarouselView(discord.ui.View):
         """
         selected_image = self.get_current_file()
         if self.on_select:
-            self.hide_buttons()
+            self.disable_buttons()
             await self.on_select(interaction, selected_image)
 
     @discord.ui.button(label="X", style=discord.ButtonStyle.danger)

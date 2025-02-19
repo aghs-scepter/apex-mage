@@ -336,18 +336,18 @@ async def compress_image(image_data_b64: str, max_size=(512, 512), quality=75) -
 
 async def format_latest_images_list(image_rows: list) -> List[dict]:
     """
-    Format image contents of the rows into a list of Discord file objects.
+    Format image contents of the rows into a list of image data dicts.
 
     Parameters:
     image_rows (list): A list of rows containing image data.
 
     Returns:
-    List[discord.File]: A list of Discord file objects containing the images.
+    List[dict]: A list of dicts containing images and their metadata.
     """
     logging.debug(f"Formatting image list...")
     image_files = []
 
-    # Iterate through the image rows and create a Discord file object for each image
+    # Iterate through the image rows and create a dict for each image
     for index, row in enumerate(reversed(image_rows)): # Query returns reverse-chronological; Reverse here to get chronological order
         image_message_id = row["channel_message_id"]
         image_data = json.loads(row["message_images"])[0]["image"]
