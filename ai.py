@@ -108,7 +108,7 @@ async def modify_image(image_data: str, prompt: str, guidance_scale: float) -> s
     """
     logging.debug(f"Generating image for prompt: {prompt}")
 
-    image_url = await upload_image_falai(io.BytesIO(base64.b64decode(image_data)), "image.jpeg")
+    image_url = await upload_image_falai(base64.b64decode(image_data), "image.jpeg")
 
     def on_queue_update(update):
         """
