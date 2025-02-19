@@ -380,7 +380,15 @@ class ImageCarouselView(discord.ui.View):
         """
         Returns the image file data of the image currently shown on the carousel.
         """
-        return self.files[self.current_index]
+        current_file_object = self.files[self.current_index]
+
+        # Get the raw bytes of the discord File
+        current_file_object.fp.seek(0) # File pointer to start
+        image_bytes = current_file_object.fp.read()
+        current_file_object.fp.seek(0) # Reset file pointer
+
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+        return { "filename": current_file_object.filename, "image": image_b64 }
     
     def disable_buttons(self):
         """
@@ -748,25 +756,9 @@ class ImageEditPerformView(discord.ui.View):
                 if self.on_complete:
                     await self.on_complete(self.interaction, error_data)
                 return
-            
-            guidance_scale = 6.5
-            if self.edit_type == "Adjust":
-                guidance_scale = 8.0
-            elif self.edit_type == "Redraw":
-                guidance_scale = 2.5
-
-            if isinstance(self.image_data.get('image'), io.BytesIO):
-                self.image_data['image'].seek(0)
-                image_bytes = self.image_data['image'].read()
-                image_b64 = base64.b64encode(image_bytes).decode('utf-8')
-            else:
-                image_b64 = self.image_data.get('image')
-            
-            if not image_b64:
-                raise ValueError("No valid image data found")
 
             # Perform the image modification
-            response = await ai.modify_image(image_b64, prompt, guidance_scale)
+            response = await ai.modify_image(self.image_data["image"], prompt, guidance_scale=7.5)
 
             # Process the response
             image_data = await ai.image_strip_headers(response["image"]["url"], "jpeg")

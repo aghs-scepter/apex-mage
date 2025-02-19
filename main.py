@@ -642,7 +642,7 @@ async def modify_image(interaction: discord.Interaction):
             image_redraw_result.set_result(result_image)
         
         # Display a "processing" message while the image is being redrawn
-        processing_message = "Please wait while your image is being modified. This may take up to 90 seconds..."
+        processing_message = "Please wait while your image is being modified. This may take up to 60 seconds..."
         processing_notes = [
             {"name": "Prompt", "value": edit_type["prompt"]}
         ]
@@ -655,8 +655,7 @@ async def modify_image(interaction: discord.Interaction):
 
         try:
             # Wait for the result with a timeout
-            image_redraw = await asyncio.wait_for(image_redraw_result, timeout=90.0)
-            print(image_redraw)
+            image_redraw = await asyncio.wait_for(image_redraw_result, timeout=60.0)
         except asyncio.TimeoutError:
             error_message = "The request timed out. Please try again."
             error_view = carousel.InfoEmbedView(message=original_message,user=user,title="Image modification error!",description=error_message,is_error=True,image_data=None)
