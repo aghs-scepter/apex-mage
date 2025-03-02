@@ -233,7 +233,10 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                     note = ">Some older messages were removed from context. Use `/clear` to reset the bot!"
 
                 if len(response) > 1024:
-                    response = response[:1000] + "--[response too long]--" # Discord has a 1024 character limit for embed field values
+                    full_response_url = ai.upload_response_to_cloud(interaction.channel_id, interaction.message_id, response)
+                    response = response[:950] + "**--[Response too long! Use the button to see the full response.]--**" # Discord has a 1024 character limit for embed field values
+                else:
+                    full_response_url = None  # No need to pass a URL if the entire response is visible in the embed
 
                 # Update the deferred message with the AI's response. Only include a file upload if required.
                 if images:
@@ -247,7 +250,8 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                         title="Prompt Response",
                         is_error=False,
                         image_data={"filename": image_file.filename, "image": images[0]["image"]},
-                        notes=info_notes
+                        notes=info_notes,
+                        full_response_url=full_response_url
                     )
                     await info_view.initialize(interaction)
                 else:
@@ -260,7 +264,8 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                         user=embed_user,
                         title="Prompt Response",
                         is_error=False,
-                        notes=info_notes
+                        notes=info_notes,
+                        full_response_url=full_response_url
                     )
                     await info_view.initialize(interaction)
             else:

@@ -21,15 +21,15 @@ read -n1 -s
 echo ""
 
 echo "Enter your Discord bot token:"
-read -r DISCORD_BOT_TOKEN
+read -rs DISCORD_BOT_TOKEN
 echo ""
 
 echo "Enter your Anthropic API key:"
-read -r ANTHROPIC_API_KEY
+read -rs ANTHROPIC_API_KEY
 echo ""
 
 echo "Enter your Fal.AI API key:"
-read -r FAL_KEY
+read -rs FAL_KEY
 echo ""
 
 echo "There are additional settings you can configure, such as rate-limits for requests to prevent API abuse. The defaults are sensible, but you can customize them. Would you like to configure these settings now? (Y/n)"

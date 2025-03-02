@@ -27,7 +27,7 @@ class InfoEmbedView(discord.ui.View):
     """
     A simple view that displays an informational or error message in an embed.
     """
-    def __init__(self, message=None, user=None, title: str = "Default Title", description: str = None, is_error: bool = False, image_data: dict = None, notes: List[dict] = None):
+    def __init__(self, message=None, user=None, title: str = "Default Title", description: str = None, is_error: bool = False, image_data: dict = None, notes: List[dict] = None, full_response_url = None):
         super().__init__()
         self.user = user
         self.username, self.user_id, self.pfp = get_user_info(user)
@@ -37,6 +37,7 @@ class InfoEmbedView(discord.ui.View):
         self.is_error = is_error
         self.image_data = image_data
         self.notes = notes
+        self.full_response_url = full_response_url
         self.embed = None
 
     async def initialize(self, interaction: discord.Interaction):
@@ -63,6 +64,14 @@ class InfoEmbedView(discord.ui.View):
                     value=note["value"],
                     inline=False
                 )
+        
+        # Add view full response button if URL is provided
+        if self.full_response_url:
+            self.add_item(discord.ui.Button(
+                label="View Full Response",
+                url=self.full_response_url,
+                style=discord.ButtonStyle.link
+            ))
 
         if self.image_data:
             embed_image = await create_file_from_image(self.image_data)
@@ -71,22 +80,26 @@ class InfoEmbedView(discord.ui.View):
             if interaction.original_response:
                 await interaction.edit_original_response(
                     embed=self.embed,
-                    attachments=[embed_image]
+                    attachments=[embed_image],
+                    view=self
                 )
             else:
                 await interaction.followup.send(
                     embed=self.embed,
-                    file=embed_image
+                    file=embed_image,
+                    view=self
                 )
         else:
             if interaction.original_response:
                 await interaction.edit_original_response(
                     attachments=[],
-                    embed=self.embed
+                    embed=self.embed,
+                    view=self
                 )
             else:
                 await interaction.followup.send(
-                    embed=self.embed
+                    embed=self.embed,
+                    view=self
                 )
         
         return
