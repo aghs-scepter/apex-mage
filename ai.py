@@ -457,18 +457,18 @@ def upload_response_to_cloud(channel_id: int, response: str) -> str:
     try:
         # Create a storage client and get the bucket
         storage_client = storage.Client()
-        print(f"Storage client: {storage_client}")
+        logging.info(f"Storage client: {storage_client}")
         bucket = storage_client.bucket("apex-mage-data")
-        print(f"Bucket: {bucket}")
+        logging.info(f"Bucket: {bucket}")
 
         # Create a blob
         blob = bucket.blob(f"overflow_responses/{channel_id}/{uuid4()}/response.md")
-        print(f"Blob: {blob}")
+        logging.info(f"Blob: {blob}")
 
         # Upload the response and fetch the URL
         blob.upload_from_string(response)
         url = blob.public_url
-        print(f"URL: {url}")
+        logging.info(f"URL: {url}")
 
         logging.debug(f"Response uploaded.")
         return url
