@@ -440,7 +440,7 @@ async def generate_embed_informational(user: str, note_title: str, note: str, er
     
     return embed
     
-async def upload_response_to_cloud(channel_id: int, message_id: int, response: str) -> str:
+def upload_response_to_cloud(channel_id: int, message_id: int, response: str) -> str:
     """
     Upload a text response from the AI to Google Cloud Storage for later retrieval.
 
@@ -454,16 +454,24 @@ async def upload_response_to_cloud(channel_id: int, message_id: int, response: s
     """
     logging.debug(f"Uploading prompt response to cloud...")
 
-    # Create a storage client and get the bucket
-    storage_client = storage.Client()
-    bucket = storage_client.bucket("apex-mage-data")
+    try:
+        # Create a storage client and get the bucket
+        storage_client = storage.Client()
+        print(f"Storage client: {storage_client}")
+        bucket = storage_client.bucket("apex-mage-data")
+        print(f"Bucket: {bucket}")
 
-    # Create a blob
-    blob = bucket.blob(f"overflow_responses/{channel_id}/{message_id}/response.md")
+        # Create a blob
+        blob = bucket.blob(f"overflow_responses/{channel_id}/{message_id}/response.md")
+        print(f"Blob: {blob}")
 
-    # Upload the response and fetch the URL
-    blob.upload_from_string(response)
-    url = blob.public_url
+        # Upload the response and fetch the URL
+        blob.upload_from_string(response)
+        url = blob.public_url
+        print(f"URL: {url}")
 
-    logging.debug(f"Response uploaded.")
-    return url
+        logging.debug(f"Response uploaded.")
+        return url
+    except Exception as ex:
+        logging.error(f"Failed to upload response to cloud: {str(ex)}")
+        raise

@@ -233,8 +233,18 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                     note = ">Some older messages were removed from context. Use `/clear` to reset the bot!"
 
                 if len(response) > 1024:
-                    full_response_url = ai.upload_response_to_cloud(interaction.channel_id, interaction.message_id, response)
-                    response = response[:950] + "**--[Response too long! Use the button to see the full response.]--**" # Discord has a 1024 character limit for embed field values
+                    try:
+                        full_response_url = await asyncio.to_thread(
+                            ai.upload_response_to_cloud,
+                            interaction.channel_id,
+                            interaction.message_id,
+                            response
+                        )
+                        response = response[:950] + "**--[Response too long! Use the button to see the full response.]--**" # Discord has a 1024 character limit for embed field values
+                    except Exception as ex:
+                        logging.error(f"Error uploading response to cloud: {str(ex)}")
+                        response = response[:950] + "**--[Response too long! Full response upload failed.]--**"
+                        full_response_url = None
                 else:
                     full_response_url = None  # No need to pass a URL if the entire response is visible in the embed
 
