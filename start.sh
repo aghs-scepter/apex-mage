@@ -13,7 +13,7 @@ if [ ! "$(docker ps -q -f name=apex-mage)" ]; then
         # Run a new container with the SQLite DB directory mounted and environment variables loaded
         docker run -d --name apex-mage --restart unless-stopped \
             --env-file /app/.env \
-            -v /appdata:/app/data apex-mage \
+            -v /appdata:/app/data \
             -v /usr/bin/docker:/usr/bin/docker \
             --mount type=bind,source=/var/run/metadata.sock,target=/var/run/metadata.sock \
             apex-mage
@@ -26,7 +26,7 @@ else
     docker build -t apex-mage .
     docker run -d --name apex-mage --restart unless-stopped \
         --env-file /app/.env \
-        -v /appdata:/app/data apex-mage \
+        -v /appdata:/app/data \
         -v /usr/bin/docker:/usr/bin/docker \
         --mount type=bind,source=/var/run/metadata.sock,target=/var/run/metadata.sock \
         apex-mage
