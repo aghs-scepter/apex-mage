@@ -15,7 +15,8 @@ if [ ! "$(docker ps -q -f name=apex-mage)" ]; then
             --env-file /app/.env \
             -v /appdata:/app/data apex-mage \
             -v /usr/bin/docker:/usr/bin/docker \
-            --mount type=bind,source=/var/run/metadata.sock,target=/var/run/metadata.sock
+            --mount type=bind,source=/var/run/metadata.sock,target=/var/run/metadata.sock \
+            apex-mage
 
     fi
 else
@@ -27,7 +28,8 @@ else
         --env-file /app/.env \
         -v /appdata:/app/data apex-mage \
         -v /usr/bin/docker:/usr/bin/docker \
-        --mount type=bind,source=/var/run/metadata.sock,target=/var/run/metadata.sock
+        --mount type=bind,source=/var/run/metadata.sock,target=/var/run/metadata.sock \
+        apex-mage
 fi
 
 echo "Application started."
