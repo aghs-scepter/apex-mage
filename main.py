@@ -237,7 +237,6 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                         full_response_url = await asyncio.to_thread(
                             ai.upload_response_to_cloud,
                             interaction.channel_id,
-                            interaction.message_id,
                             response
                         )
                         response = response[:950] + "**--[Response too long! Use the button to see the full response.]--**" # Discord has a 1024 character limit for embed field values

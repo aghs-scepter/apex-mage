@@ -440,7 +440,7 @@ async def generate_embed_informational(user: str, note_title: str, note: str, er
     
     return embed
     
-def upload_response_to_cloud(channel_id: int, message_id: int, response: str) -> str:
+def upload_response_to_cloud(channel_id: int, response: str) -> str:
     """
     Upload a text response from the AI to Google Cloud Storage for later retrieval.
 
@@ -462,7 +462,7 @@ def upload_response_to_cloud(channel_id: int, message_id: int, response: str) ->
         print(f"Bucket: {bucket}")
 
         # Create a blob
-        blob = bucket.blob(f"overflow_responses/{channel_id}/{message_id}/response.md")
+        blob = bucket.blob(f"overflow_responses/{channel_id}/{uuid4()}/response.md")
         print(f"Blob: {blob}")
 
         # Upload the response and fetch the URL
