@@ -466,7 +466,11 @@ def upload_response_to_cloud(channel_id: int, response: str) -> str:
         logging.info(f"Blob: {blob}")
 
         # Upload the response and fetch the URL
-        blob.upload_from_string(response)
+        blob.upload_from_string(
+            response,
+            content_type="text/markdown",
+            predefined_acl="publicRead"
+        )
         url = blob.public_url
         logging.info(f"URL: {url}")
 
