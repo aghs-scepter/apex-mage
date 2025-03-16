@@ -27,7 +27,7 @@ class InfoEmbedView(discord.ui.View):
     """
     A simple view that displays an informational or error message in an embed.
     """
-    def __init__(self, message=None, user=None, title: str = "Default Title", description: str = None, is_error: bool = False, image_data: dict = None, notes: List[dict] = None, full_response_url = None):
+    def __init__(self, message=None, user=None, title: str = "Default Title", description: str = None, is_error: bool = False, image_data: dict = None, notes: List[dict] = None, full_response_url = None, full_prompt_url = None):
         super().__init__()
         self.user = user
         self.username, self.user_id, self.pfp = get_user_info(user)
@@ -38,6 +38,7 @@ class InfoEmbedView(discord.ui.View):
         self.image_data = image_data
         self.notes = notes
         self.full_response_url = full_response_url
+        self.full_prompt_url = full_prompt_url
         self.embed = None
 
     async def initialize(self, interaction: discord.Interaction):
@@ -70,6 +71,14 @@ class InfoEmbedView(discord.ui.View):
             self.add_item(discord.ui.Button(
                 label="View Full Response",
                 url=self.full_response_url,
+                style=discord.ButtonStyle.link
+            ))
+        
+        # Add view full prompt button if URL is provided
+        if self.full_prompt_url:
+            self.add_item(discord.ui.Button(
+                label="View Full Prompt",
+                url=self.full_prompt_url,
                 style=discord.ButtonStyle.link
             ))
 

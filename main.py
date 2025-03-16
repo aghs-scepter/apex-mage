@@ -1,6 +1,6 @@
 import asyncio
 import base64
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from os import getenv
 import json
 import discord
@@ -9,6 +9,36 @@ from discord import app_commands
 import ai
 import mem
 import carousel as carousel
+
+# Add this utility function after imports but before the client class
+async def handle_text_overflow(text_type: str, text: str, channel_id: int) -> Tuple[str, Optional[str]]:
+    """
+    Handle text overflow by truncating and uploading to cloud storage if needed.
+    
+    Parameters:
+    text_type (str): The type of text ("prompt" or "response")
+    text (str): The original text
+    channel_id (int): The channel ID
+    
+    Returns:
+    tuple[str, Optional[str]]: (modified_text, cloud_url or None)
+    """
+    if len(text) > 1024:
+        try:
+            cloud_url = await asyncio.to_thread(
+                ai.upload_response_to_cloud,
+                text_type,
+                channel_id,
+                text
+            )
+            modified_text = text[:950] + f"**--[{text_type.capitalize()} too long! Use the button to see the full {text_type}.]--**"
+            return modified_text, cloud_url
+        except Exception as ex:
+            logging.error(f"Error uploading {text_type} to cloud: {str(ex)}")
+            modified_text = text[:950] + f"**--[{text_type.capitalize()} too long! Full {text_type} upload failed.]--**"
+            return modified_text, None
+    else:
+        return text, None
 
 class DiscordAiClient(discord.Client):
     """
@@ -208,10 +238,13 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                     deactivate_old_messages = True # Use this to notify user that old messages were pruned
                     mem.deactivate_old_messages(interaction.channel.id, 'All Models', mem.WINDOW)
                 
+                # Process the prompt for potential overflow before showing the processing message
+                display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
+                
                 # Display a "processing" message while the image is being redrawn
                 processing_message = "Thinking... (This may take up to 30 seconds)"
                 processing_notes = [
-                    {"name": "Prompt", "value": prompt}
+                    {"name": "Prompt", "value": display_prompt}
                 ]
                 processing_view = carousel.InfoEmbedView(
                     message=interaction.message,
@@ -220,9 +253,13 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                     description=processing_message,
                     is_error=False,
                     image_data={"filename": upload.filename, "image": images[0]["image"]} if images else None,
-                    notes=processing_notes
+                    notes=processing_notes,
+                    full_prompt_url=full_prompt_url
                 )
                 await processing_view.initialize(interaction)
+                
+                # Process the prompt for potential overflow
+                display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
                 
                 # Get the AI response and record it in the database
                 response = await ai.prompt('Anthropic', 'prompt', prompt, context)
@@ -232,26 +269,14 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                 if deactivate_old_messages:
                     note = ">Some older messages were removed from context. Use `/clear` to reset the bot!"
 
-                if len(response) > 1024:
-                    try:
-                        full_response_url = await asyncio.to_thread(
-                            ai.upload_response_to_cloud,
-                            interaction.channel_id,
-                            response
-                        )
-                        response = response[:950] + "**--[Response too long! Use the button to see the full response.]--**" # Discord has a 1024 character limit for embed field values
-                    except Exception as ex:
-                        logging.error(f"Error uploading response to cloud: {str(ex)}")
-                        response = response[:950] + "**--[Response too long! Full response upload failed.]--**"
-                        full_response_url = None
-                else:
-                    full_response_url = None  # No need to pass a URL if the entire response is visible in the embed
-
+                # Handle response overflow
+                display_response, full_response_url = await handle_text_overflow("response", response, interaction.channel.id)
+                
                 # Update the deferred message with the AI's response. Only include a file upload if required.
                 if images:
                     info_notes = [
-                        {"name": "Prompt", "value": prompt},
-                        {"name": "Response", "value": response}
+                        {"name": "Prompt", "value": display_prompt},
+                        {"name": "Response", "value": display_response}
                     ]
                     info_view = carousel.InfoEmbedView(
                         message=interaction.message,
@@ -260,13 +285,14 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                         is_error=False,
                         image_data={"filename": image_file.filename, "image": images[0]["image"]},
                         notes=info_notes,
-                        full_response_url=full_response_url
+                        full_response_url=full_response_url,
+                        full_prompt_url=full_prompt_url
                     )
                     await info_view.initialize(interaction)
                 else:
                     info_notes = [
-                        {"name": "Prompt", "value": prompt},
-                        {"name": "Response", "value": response}
+                        {"name": "Prompt", "value": display_prompt},
+                        {"name": "Response", "value": display_response}
                     ]
                     info_view = carousel.InfoEmbedView(
                         message=interaction.message,
@@ -274,7 +300,8 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                         title="Prompt Response",
                         is_error=False,
                         notes=info_notes,
-                        full_response_url=full_response_url
+                        full_response_url=full_response_url,
+                        full_prompt_url=full_prompt_url
                     )
                     await info_view.initialize(interaction)
             else:
@@ -326,6 +353,9 @@ async def create_image(interaction: discord.Interaction, prompt: str):
             within_rate_limit = await mem.enforce_image_rate_limits(interaction.channel.id)
 
             if within_rate_limit:
+                # Process the prompt for potential overflow
+                display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
+                
                 # Create the origin channel if it doesn't exist in the DB, then add the prompt message
                 mem.create_channel(interaction.channel.id)
                 mem.add_message(interaction.channel.id, 'Fal.AI', 'prompt', True, prompt)
@@ -333,7 +363,7 @@ async def create_image(interaction: discord.Interaction, prompt: str):
                 # Display a "processing" message while the image is being redrawn
                 processing_message = "Generating an image... (This may take up to 60 seconds)"
                 processing_notes = [
-                    {"name": "Prompt", "value": prompt}
+                    {"name": "Prompt", "value": display_prompt}
                 ]
                 processing_view = carousel.InfoEmbedView(
                     message=interaction.message,
@@ -341,7 +371,8 @@ async def create_image(interaction: discord.Interaction, prompt: str):
                     title="Image generation in progress",
                     description=processing_message,
                     is_error=False,
-                    notes=processing_notes
+                    notes=processing_notes,
+                    full_prompt_url=full_prompt_url
                 )
                 await processing_view.initialize(interaction)
 
@@ -359,7 +390,7 @@ async def create_image(interaction: discord.Interaction, prompt: str):
                 # Update the deferred message with the prompt text and the image file attached
                 output_message = "Your image was created successfully. You can use it for future `/prompt` and `/modify_image` commands."
                 output_notes = [
-                    {"name": "Prompt", "value": prompt}
+                    {"name": "Prompt", "value": display_prompt}
                 ]
                 output_view = carousel.InfoEmbedView(
                     message=interaction.message,
@@ -368,32 +399,72 @@ async def create_image(interaction: discord.Interaction, prompt: str):
                     description=output_message, 
                     is_error=False,
                     notes=output_notes,
+                    full_prompt_url=full_prompt_url,
                     image_data={"filename": output_filename, "image": image_data}
                 )
                 await output_view.initialize(interaction)
             else:
                 # If the channel is outside of the rate limit, tell users to chill tf out
                 error_message = f"You're requesting too many images and have been rate-limited. The bot can handle a maximum of {getenv('FAL_RATE_LIMIT')} `/create_image` requests per hour. Please wait a few minutes before sending more requests."
+                
+                # Process the prompt for potential overflow in error view
+                display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
+                
                 error_notes = [
-                    {"name": "Prompt", "value": prompt},
+                    {"name": "Prompt", "value": display_prompt},
                 ]
-                error_view = carousel.InfoEmbedView(message=interaction.message,user=embed_user,title="Image generation error!",description=error_message,is_error=True,image_data=None,notes=error_notes)
+                error_view = carousel.InfoEmbedView(
+                    message=interaction.message,
+                    user=embed_user,
+                    title="Image generation error!",
+                    description=error_message,
+                    is_error=True,
+                    image_data=None,
+                    notes=error_notes,
+                    full_prompt_url=full_prompt_url
+                )
                 await error_view.initialize(interaction)
 
     except asyncio.TimeoutError:
         error_message = "The image generation request timed out after 60 seconds. Please try again."
+        
+        # Process the prompt for potential overflow in error view
+        display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
+        
         error_notes = [
-            {"name": "Prompt", "value": prompt},
+            {"name": "Prompt", "value": display_prompt},
         ]
-        error_view = carousel.InfoEmbedView(message=interaction.message,user=embed_user,title="Image generation error!",description=error_message,is_error=True,image_data=None,notes=error_notes)
+        error_view = carousel.InfoEmbedView(
+            message=interaction.message,
+            user=embed_user,
+            title="Image generation error!",
+            description=error_message,
+            is_error=True,
+            image_data=None,
+            notes=error_notes,
+            full_prompt_url=full_prompt_url
+        )
         await error_view.initialize(interaction)
     
     except Exception as ex:
         error_message = f"An unexpected error occurred while processing your request."
+        
+        # Process the prompt for potential overflow in error view
+        display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
+        
         error_notes = [
-            {"name": "Prompt", "value": prompt},
+            {"name": "Prompt", "value": display_prompt},
         ]
-        error_view = carousel.InfoEmbedView(message=interaction.message,user=embed_user,title="Image generation error!",description=error_message,is_error=True,image_data=None,notes=error_notes)
+        error_view = carousel.InfoEmbedView(
+            message=interaction.message,
+            user=embed_user,
+            title="Image generation error!",
+            description=error_message,
+            is_error=True,
+            image_data=None,
+            notes=error_notes,
+            full_prompt_url=full_prompt_url
+        )
         await error_view.initialize(interaction)
 
 @client.tree.command()
@@ -423,6 +494,25 @@ async def behavior(interaction: discord.Interaction, prompt: str):
             # Get messages used as context for the prompt
             context = mem.get_visible_messages(interaction.channel.id, 'All Models')
 
+            # Process the prompt for potential overflow before showing any processing message
+            display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
+            
+            # If you want to add a processing message, include it here
+            processing_message = "Updating bot behavior... (This may take a few seconds)"
+            processing_notes = [
+                {"name": "Prompt", "value": display_prompt}
+            ]
+            processing_view = carousel.InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Behavior Change",
+                description=processing_message,
+                is_error=False,
+                notes=processing_notes,
+                full_prompt_url=full_prompt_url
+            )
+            await processing_view.initialize(interaction)
+            
             # Record the behavior change in the database. This is a little weird, but is stored as a "message" for consistency.
             response = await ai.prompt('Anthropic', 'behavior', prompt, context)
             mem.add_message(interaction.channel.id, 'Anthropic', "assistant", False, response)
@@ -430,9 +520,9 @@ async def behavior(interaction: discord.Interaction, prompt: str):
             # Update the deferred message with the prompt text and acknowledgement of the behavior change
             success_message = "The bot's behavior has been updated. Future responses will reflect this change."
             success_notes = [
-                {"name": "Prompt", "value": prompt},
+                {"name": "Prompt", "value": display_prompt},
             ]
-            success_view = carousel.InfoEmbedView(message=interaction.message,user=embed_user,title="Behavior change successful",description=success_message,is_error=False,image_data=None,notes=success_notes)
+            success_view = carousel.InfoEmbedView(message=interaction.message,user=embed_user,title="Behavior change successful",description=success_message,is_error=False,image_data=None,notes=success_notes,full_prompt_url=full_prompt_url)
             await success_view.initialize(interaction)
 
     except asyncio.TimeoutError:
@@ -655,12 +745,15 @@ async def modify_image(interaction: discord.Interaction):
             """
             image_redraw_result.set_result(result_image)
         
+        # Process the prompt for potential overflow
+        display_prompt, full_prompt_url = await handle_text_overflow("prompt", edit_type["prompt"], interaction.channel.id)
+        
         # Display a "processing" message while the image is being redrawn
         processing_message = "Please wait while your image is being modified. This may take up to 60 seconds..."
         processing_notes = [
-            {"name": "Prompt", "value": edit_type["prompt"]}
+            {"name": "Prompt", "value": display_prompt}
         ]
-        processing_view = carousel.InfoEmbedView(message=original_message,user=user,title="Image modification in progress",description=processing_message,is_error=False,image_data=image_selection,notes=processing_notes)
+        processing_view = carousel.InfoEmbedView(message=original_message,user=user,title="Image modification in progress",description=processing_message,is_error=False,image_data=image_selection,notes=processing_notes,full_prompt_url=full_prompt_url)
         await processing_view.initialize(interaction)
         
         # Ask the user for a prompt to redraw the image
@@ -683,9 +776,9 @@ async def modify_image(interaction: discord.Interaction):
         # Create an embed containing the final product of the image redraw
         success_message = "Image modification complete."
         notes = [
-            {"name": "Prompt", "value": edit_type["prompt"]}
+            {"name": "Prompt", "value": display_prompt}
         ]
-        success_view = carousel.InfoEmbedView(message=original_message,user=user,title="Image modification successful",description=success_message,is_error=False,notes=notes,image_data=image_redraw)
+        success_view = carousel.InfoEmbedView(message=original_message,user=user,title="Image modification successful",description=success_message,is_error=False,notes=notes,image_data=image_redraw,full_prompt_url=full_prompt_url)
         await success_view.initialize(interaction)
         return
 
