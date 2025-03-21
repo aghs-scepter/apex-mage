@@ -198,7 +198,7 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
     }
 
     try:
-        async with asyncio.timeout(60.0):
+        async with asyncio.timeout(90.0):
             # Check if channel is within or outside of prompt rate limits
             within_rate_limit = await mem.enforce_text_rate_limits(interaction.channel.id)
 
@@ -238,7 +238,7 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                     deactivate_old_messages = True # Use this to notify user that old messages were pruned
                     mem.deactivate_old_messages(interaction.channel.id, 'All Models', mem.WINDOW)
                 
-                # Process the prompt for potential overflow before showing the processing message
+# Process the prompt for potential overflow before showing the processing message
                 display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
                 
                 # Display a "processing" message while the image is being redrawn
@@ -257,7 +257,7 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                     full_prompt_url=full_prompt_url
                 )
                 await processing_view.initialize(interaction)
-                
+
                 # Process the prompt for potential overflow
                 display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
                 
@@ -271,7 +271,7 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
 
                 # Handle response overflow
                 display_response, full_response_url = await handle_text_overflow("response", response, interaction.channel.id)
-                
+
                 # Update the deferred message with the AI's response. Only include a file upload if required.
                 if images:
                     info_notes = [
@@ -314,7 +314,7 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                 await error_view.initialize(interaction)
 
     except asyncio.TimeoutError:
-        error_message = "The request timed out after 60 seconds. Please try again."
+        error_message = "The request timed out after 90 seconds. Please try again."
         error_notes = [
             {"name": "Prompt", "value": prompt},
         ]
@@ -348,7 +348,7 @@ async def create_image(interaction: discord.Interaction, prompt: str):
     }
 
     try:
-        async with asyncio.timeout(60.0):
+        async with asyncio.timeout(90.0):
             # Check if channel is within or outside of prompt rate limits
             within_rate_limit = await mem.enforce_image_rate_limits(interaction.channel.id)
 
@@ -361,7 +361,7 @@ async def create_image(interaction: discord.Interaction, prompt: str):
                 mem.add_message(interaction.channel.id, 'Fal.AI', 'prompt', True, prompt)
 
                 # Display a "processing" message while the image is being redrawn
-                processing_message = "Generating an image... (This may take up to 60 seconds)"
+                processing_message = "Generating an image... (This may take up to 90 seconds)"
                 processing_notes = [
                     {"name": "Prompt", "value": display_prompt}
                 ]
@@ -406,7 +406,7 @@ async def create_image(interaction: discord.Interaction, prompt: str):
             else:
                 # If the channel is outside of the rate limit, tell users to chill tf out
                 error_message = f"You're requesting too many images and have been rate-limited. The bot can handle a maximum of {getenv('FAL_RATE_LIMIT')} `/create_image` requests per hour. Please wait a few minutes before sending more requests."
-                
+
                 # Process the prompt for potential overflow in error view
                 display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
                 
@@ -426,8 +426,8 @@ async def create_image(interaction: discord.Interaction, prompt: str):
                 await error_view.initialize(interaction)
 
     except asyncio.TimeoutError:
-        error_message = "The image generation request timed out after 60 seconds. Please try again."
-        
+        error_message = "The image generation request timed out after 90 seconds. Please try again."
+
         # Process the prompt for potential overflow in error view
         display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
         
@@ -448,7 +448,7 @@ async def create_image(interaction: discord.Interaction, prompt: str):
     
     except Exception as ex:
         error_message = f"An unexpected error occurred while processing your request."
-        
+
         # Process the prompt for potential overflow in error view
         display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
         
@@ -486,7 +486,7 @@ async def behavior(interaction: discord.Interaction, prompt: str):
     }
 
     try:
-        async with asyncio.timeout(60.0):
+        async with asyncio.timeout(90.0):
             # Create the origin channel if it doesn't exist in the DB, then add the prompt message
             mem.create_channel(interaction.channel.id)
             mem.add_message(interaction.channel.id, 'Anthropic', 'behavior', False, prompt)
@@ -496,7 +496,7 @@ async def behavior(interaction: discord.Interaction, prompt: str):
 
             # Process the prompt for potential overflow before showing any processing message
             display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
-            
+
             # If you want to add a processing message, include it here
             processing_message = "Updating bot behavior... (This may take a few seconds)"
             processing_notes = [
@@ -512,7 +512,7 @@ async def behavior(interaction: discord.Interaction, prompt: str):
                 full_prompt_url=full_prompt_url
             )
             await processing_view.initialize(interaction)
-            
+
             # Record the behavior change in the database. This is a little weird, but is stored as a "message" for consistency.
             response = await ai.prompt('Anthropic', 'behavior', prompt, context)
             mem.add_message(interaction.channel.id, 'Anthropic', "assistant", False, response)
@@ -526,7 +526,7 @@ async def behavior(interaction: discord.Interaction, prompt: str):
             await success_view.initialize(interaction)
 
     except asyncio.TimeoutError:
-        error_message = "The request timed out after 60 seconds. Please try again."
+        error_message = "The request timed out after 90 seconds. Please try again."
         error_notes = [
             {"name": "Prompt", "value": prompt},
         ]
@@ -643,10 +643,10 @@ async def modify_image(interaction: discord.Interaction):
 
     try:
         # Wait for the result with a timeout
-        type_selection = await asyncio.wait_for(type_selection_result, timeout=60.0)
+        type_selection = await asyncio.wait_for(type_selection_result, timeout=90.0)
         original_message = selection_mode.message
     except asyncio.TimeoutError:
-        error_message = "The request timed out after 60 seconds. Please try again."
+        error_message = "The request timed out after 90 seconds. Please try again."
         error_view = carousel.InfoEmbedView(message=None,user=user,title="Image selection error!",description=error_message,is_error=True,image_data=None)
         await error_view.initialize(interaction)
         return
@@ -749,7 +749,7 @@ async def modify_image(interaction: discord.Interaction):
         display_prompt, full_prompt_url = await handle_text_overflow("prompt", edit_type["prompt"], interaction.channel.id)
         
         # Display a "processing" message while the image is being redrawn
-        processing_message = "Please wait while your image is being modified. This may take up to 60 seconds..."
+        processing_message = "Please wait while your image is being modified. This may take up to 90 seconds..."
         processing_notes = [
             {"name": "Prompt", "value": display_prompt}
         ]
@@ -758,11 +758,11 @@ async def modify_image(interaction: discord.Interaction):
         
         # Ask the user for a prompt to redraw the image
         image_redraw_view = carousel.ImageEditPerformView(interaction=interaction,image_data=image_selection, edit_type=edit_type["edit_type"], user=user, message=original_message, on_complete=handle_image_redraw)
-        await image_redraw_view.initialize(image_redraw_view)
+        await image_redraw_view.initialize(interaction)
 
         try:
             # Wait for the result with a timeout
-            image_redraw = await asyncio.wait_for(image_redraw_result, timeout=60.0)
+            image_redraw = await asyncio.wait_for(image_redraw_result, timeout=90.0)
         except asyncio.TimeoutError:
             error_message = "The request timed out. Please try again."
             error_view = carousel.InfoEmbedView(message=original_message,user=user,title="Image modification error!",description=error_message,is_error=True,image_data=None)
