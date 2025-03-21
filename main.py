@@ -238,7 +238,7 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                     deactivate_old_messages = True # Use this to notify user that old messages were pruned
                     mem.deactivate_old_messages(interaction.channel.id, 'All Models', mem.WINDOW)
                 
-# Process the prompt for potential overflow before showing the processing message
+                # Process the prompt for potential overflow before showing the processing message
                 display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
                 
                 # Display a "processing" message while the image is being redrawn
