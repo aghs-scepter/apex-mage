@@ -10,6 +10,13 @@ import ai
 import mem
 import carousel as carousel
 
+# Timeout constants
+DEFAULT_CLEAR_TIMEOUT = 60.0
+DEFAULT_PROMPT_TIMEOUT = 240.0
+DEFAULT_IMAGE_TIMEOUT = 240.0
+DEFAULT_USER_INTERACTION_TIMEOUT = 90.0
+DEFAULT_EXTENDED_USER_INTERACTION_TIMEOUT = 600.0
+
 # Add this utility function after imports but before the client class
 async def handle_text_overflow(text_type: str, text: str, channel_id: int) -> Tuple[str, Optional[str]]:
     """
@@ -184,11 +191,20 @@ async def upload_image(interaction: discord.Interaction, image: discord.Attachme
     
 @client.tree.command()
 @app_commands.describe(prompt='Prompt for the AI to respond to')
-async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional[discord.Attachment] = None):
+async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional[discord.Attachment] = None, timeout: Optional[float] = None):
     """
     Submit a prompt to the AI and receive a response.
+    
+    Parameters:
+    prompt (str): The prompt for the AI to respond to.
+    upload (Optional[discord.Attachment]): An optional image attachment.
+    timeout (Optional[float]): The timeout for the request in seconds. Defaults to DEFAULT_PROMPT_TIMEOUT.
     """
     await interaction.response.defer() # Defer to create a "thinking" spinner and avoid timeout
+
+    # Use default timeout if none provided
+    if timeout is None:
+        timeout = DEFAULT_PROMPT_TIMEOUT
 
     # Create the user slug for decorating the result embed
     embed_user = {
@@ -198,7 +214,7 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
     }
 
     try:
-        async with asyncio.timeout(90.0):
+        async with asyncio.timeout(timeout):
             # Check if channel is within or outside of prompt rate limits
             within_rate_limit = await mem.enforce_text_rate_limits(interaction.channel.id)
 
@@ -314,7 +330,7 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                 await error_view.initialize(interaction)
 
     except asyncio.TimeoutError:
-        error_message = "The request timed out after 90 seconds. Please try again."
+        error_message = f"The request timed out after {timeout} seconds. Please try again."
         error_notes = [
             {"name": "Prompt", "value": prompt},
         ]
@@ -331,14 +347,19 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
 
 @client.tree.command()
 @app_commands.describe(prompt='Description of the image you want to generate')
-async def create_image(interaction: discord.Interaction, prompt: str):
+async def create_image(interaction: discord.Interaction, prompt: str, timeout: Optional[float] = None):
     """
     Submit an image gen request to the AI and receive a response as a file attachment.
 
     Parameters:
     prompt (str): The prompt for the AI.
+    timeout (Optional[float]): The timeout for the request in seconds. Defaults to DEFAULT_IMAGE_TIMEOUT.
     """
     await interaction.response.defer() # Defer to create a "thinking" spinner and avoid timeout
+
+    # Use default timeout if none provided
+    if timeout is None:
+        timeout = DEFAULT_IMAGE_TIMEOUT
 
     # Create the user slug for decorating the result embed
     embed_user = {
@@ -348,7 +369,7 @@ async def create_image(interaction: discord.Interaction, prompt: str):
     }
 
     try:
-        async with asyncio.timeout(90.0):
+        async with asyncio.timeout(timeout):
             # Check if channel is within or outside of prompt rate limits
             within_rate_limit = await mem.enforce_image_rate_limits(interaction.channel.id)
 
@@ -361,7 +382,7 @@ async def create_image(interaction: discord.Interaction, prompt: str):
                 mem.add_message(interaction.channel.id, 'Fal.AI', 'prompt', True, prompt)
 
                 # Display a "processing" message while the image is being redrawn
-                processing_message = "Generating an image... (This may take up to 90 seconds)"
+                processing_message = "Generating an image... (This may take up to 180 seconds)"
                 processing_notes = [
                     {"name": "Prompt", "value": display_prompt}
                 ]
@@ -426,7 +447,7 @@ async def create_image(interaction: discord.Interaction, prompt: str):
                 await error_view.initialize(interaction)
 
     except asyncio.TimeoutError:
-        error_message = "The image generation request timed out after 90 seconds. Please try again."
+        error_message = f"The image generation request timed out after {timeout} seconds. Please try again."
 
         # Process the prompt for potential overflow in error view
         display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
@@ -469,14 +490,19 @@ async def create_image(interaction: discord.Interaction, prompt: str):
 
 @client.tree.command()
 @app_commands.describe(prompt='Description of the personality of the AI')
-async def behavior(interaction: discord.Interaction, prompt: str):
+async def behavior(interaction: discord.Interaction, prompt: str, timeout: Optional[float] = None):
     """
     Submit a behavior change prompt to the AI which will take effect for future prompts.
 
     Parameters:
     prompt (str): The behavior change prompt to submit.
+    timeout (Optional[float]): The timeout for the request in seconds. Defaults to DEFAULT_PROMPT_TIMEOUT.
     """
     await interaction.response.defer() # Defer to create a "thinking" spinner and avoid timeout
+
+    # Use default timeout if none provided
+    if timeout is None:
+        timeout = DEFAULT_PROMPT_TIMEOUT
 
     # Create the user slug for decorating the result embed
     embed_user = {
@@ -486,7 +512,7 @@ async def behavior(interaction: discord.Interaction, prompt: str):
     }
 
     try:
-        async with asyncio.timeout(90.0):
+        async with asyncio.timeout(timeout):
             # Create the origin channel if it doesn't exist in the DB, then add the prompt message
             mem.create_channel(interaction.channel.id)
             mem.add_message(interaction.channel.id, 'Anthropic', 'behavior', False, prompt)
@@ -526,7 +552,7 @@ async def behavior(interaction: discord.Interaction, prompt: str):
             await success_view.initialize(interaction)
 
     except asyncio.TimeoutError:
-        error_message = "The request timed out after 90 seconds. Please try again."
+        error_message = f"The request timed out after {timeout} seconds. Please try again."
         error_notes = [
             {"name": "Prompt", "value": prompt},
         ]
@@ -543,11 +569,18 @@ async def behavior(interaction: discord.Interaction, prompt: str):
 
 @client.tree.command()
 @app_commands.describe()
-async def clear(interaction: discord.Interaction):
+async def clear(interaction: discord.Interaction, timeout: Optional[float] = None):
     """
     Clear the bot's context for the current channel, starting with empty context and default behavior.
+    
+    Parameters:
+    timeout (Optional[float]): The timeout for the request in seconds. Defaults to DEFAULT_CLEAR_TIMEOUT.
     """
     await interaction.response.defer() # Defer to create a "thinking" spinner and avoid timeout
+
+    # Use default timeout if none provided
+    if timeout is None:
+        timeout = DEFAULT_CLEAR_TIMEOUT
 
     # Create the user slug for decorating the result embed
     embed_user = {
@@ -565,7 +598,7 @@ async def clear(interaction: discord.Interaction):
         user (dict): The user object for the command.
         """
         try:
-            async with asyncio.timeout(10.0):
+            async with asyncio.timeout(timeout):
                 if confirm_clear:
                     # Create the origin channel if it doesn't exist in the DB, then clear any existing context
                     mem.create_channel(interaction.channel.id)
@@ -582,7 +615,7 @@ async def clear(interaction: discord.Interaction):
                     await success_view.initialize(interaction)
         
         except asyncio.TimeoutError:
-            error_message = "The request timed out after 10 seconds. Please try again."
+            error_message = f"The request timed out after {timeout} seconds. Please try again."
             error_view = carousel.InfoEmbedView(message=interaction.message,user=user,title="Clear history error!",description=error_message,is_error=True,image_data=None)
             await error_view.initialize(interaction)
         
@@ -597,7 +630,7 @@ async def clear(interaction: discord.Interaction):
     
 @client.tree.command()
 @app_commands.describe()
-async def modify_image(interaction: discord.Interaction):
+async def modify_image(interaction: discord.Interaction, timeout: Optional[float] = None):
     """
     Select a recent image to modify using the AI. This command can accept images through a few avenues:
     - select their most recently selected image
@@ -606,8 +639,13 @@ async def modify_image(interaction: discord.Interaction):
 
     Parameters:
     interaction (discord.Interaction): The interaction object for the command.
+    timeout (Optional[float]): The timeout for the request in seconds. Defaults to DEFAULT_IMAGE_TIMEOUT.
     """
     await interaction.response.defer() # Defer to create a "thinking" spinner and avoid timeout
+    
+    # Use default timeout if none provided
+    if timeout is None:
+        timeout = DEFAULT_IMAGE_TIMEOUT
     
     # Create the user slug for decorating the result embed
     user = {
@@ -643,10 +681,10 @@ async def modify_image(interaction: discord.Interaction):
 
     try:
         # Wait for the result with a timeout
-        type_selection = await asyncio.wait_for(type_selection_result, timeout=90.0)
+        type_selection = await asyncio.wait_for(type_selection_result, timeout=DEFAULT_USER_INTERACTION_TIMEOUT)
         original_message = selection_mode.message
     except asyncio.TimeoutError:
-        error_message = "The request timed out after 90 seconds. Please try again."
+        error_message = f"The request timed out after {DEFAULT_USER_INTERACTION_TIMEOUT} seconds. Please try again."
         error_view = carousel.InfoEmbedView(message=None,user=user,title="Image selection error!",description=error_message,is_error=True,image_data=None)
         await error_view.initialize(interaction)
         return
@@ -690,7 +728,7 @@ async def modify_image(interaction: discord.Interaction):
 
         try:
             # Wait for the result with a timeout
-            image_selection = await asyncio.wait_for(image_selection_result, timeout=120.0)
+            image_selection = await asyncio.wait_for(image_selection_result, timeout=DEFAULT_USER_INTERACTION_TIMEOUT)
             if not image_selection:
                 info_message = "Request cancelled by a user. No image was modified."
                 info_view = carousel.InfoEmbedView(message=original_message,user=user,title="Image modification cancelled",description=info_message,is_error=True,image_data=None)
@@ -698,7 +736,7 @@ async def modify_image(interaction: discord.Interaction):
                 return
         
         except asyncio.TimeoutError:
-            error_message = "The request timed out after 120 seconds. Please try again."
+            error_message = f"The request timed out after {DEFAULT_USER_INTERACTION_TIMEOUT} seconds. Please try again."
             error_view = carousel.InfoEmbedView(message=original_message,user=user,title="Image selection error!",description=error_message,is_error=True,image_data=None)
             await error_view.initialize(interaction)
             return
@@ -718,9 +756,9 @@ async def modify_image(interaction: discord.Interaction):
 
     try:
         # Wait for the result with a timeout
-        edit_type = await asyncio.wait_for(edit_type_result, timeout=600.0)
+        edit_type = await asyncio.wait_for(edit_type_result, timeout=DEFAULT_EXTENDED_USER_INTERACTION_TIMEOUT)
     except asyncio.TimeoutError:
-        error_message = "The request timed out after 10 minutes. Please try again."
+        error_message = f"The request timed out after {DEFAULT_EXTENDED_USER_INTERACTION_TIMEOUT} seconds. Please try again."
         error_view = carousel.InfoEmbedView(message=original_message,user=user,title="Image modification error!",description=error_message,is_error=True,image_data=None)
         await error_view.initialize(interaction)
     
@@ -762,9 +800,9 @@ async def modify_image(interaction: discord.Interaction):
 
         try:
             # Wait for the result with a timeout
-            image_redraw = await asyncio.wait_for(image_redraw_result, timeout=90.0)
+            image_redraw = await asyncio.wait_for(image_redraw_result, timeout=DEFAULT_USER_INTERACTION_TIMEOUT)
         except asyncio.TimeoutError:
-            error_message = "The request timed out. Please try again."
+            error_message = f"The request timed out after {DEFAULT_USER_INTERACTION_TIMEOUT} seconds. Please try again."
             error_view = carousel.InfoEmbedView(message=original_message,user=user,title="Image modification error!",description=error_message,is_error=True,image_data=None)
             await error_view.initialize(interaction)
             return
