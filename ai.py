@@ -188,7 +188,7 @@ async def prompt_anthropic(prompt_type: str, prompt: str, context) -> str:
         try:
             response = anthropic_client.messages.create(
                 model=model,
-                max_tokens=8192,
+                max_tokens=16384,
                 system=system_prompt,
                 messages=formatted_prompt
             )
