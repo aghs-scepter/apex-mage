@@ -1,0 +1,478 @@
+"""Chat-related Discord slash commands."""
+
+import asyncio
+import base64
+import functools
+import json
+import logging
+from os import getenv
+from typing import TYPE_CHECKING
+
+import discord
+from discord import app_commands
+
+import ai
+from src.adapters import WINDOW
+from src.clients.discord.views.carousel import (
+    ClearHistoryConfirmationView,
+    InfoEmbedView,
+)
+
+if TYPE_CHECKING:
+    from src.clients.discord.bot import DiscordBot
+
+# Timeout constants
+DEFAULT_PROMPT_TIMEOUT = 240.0
+DEFAULT_CLEAR_TIMEOUT = 60.0
+
+# Global command counter (resets on restart)
+_command_count = 0
+
+
+def count_command(func):
+    """Decorator that increments and logs the global command counter."""
+
+    @functools.wraps(func)
+    async def wrapper(interaction: discord.Interaction, *args, **kwargs):
+        global _command_count
+        _command_count += 1
+        logging.info(f"Command '{func.__name__}' invoked. Count: {_command_count}")
+        return await func(interaction, *args, **kwargs)
+
+    return wrapper
+
+
+async def handle_text_overflow(
+    text_type: str, text: str, channel_id: int
+) -> tuple[str, str | None]:
+    """Handle text overflow by truncating and uploading to cloud storage if needed.
+
+    Args:
+        text_type: The type of text ("prompt" or "response")
+        text: The original text
+        channel_id: The channel ID
+
+    Returns:
+        Tuple of (modified_text, cloud_url or None)
+    """
+    if len(text) > 1024:
+        try:
+            cloud_url = await asyncio.to_thread(
+                ai.upload_response_to_cloud, text_type, channel_id, text
+            )
+            modified_text = (
+                text[:950]
+                + f"**--[{text_type.capitalize()} too long! "
+                f"Use the button to see the full {text_type}.]--**"
+            )
+            return modified_text, cloud_url
+        except Exception as ex:
+            logging.error(f"Error uploading {text_type} to cloud: {ex}")
+            modified_text = (
+                text[:950]
+                + f"**--[{text_type.capitalize()} too long! "
+                f"Full {text_type} upload failed.]--**"
+            )
+            return modified_text, None
+    return text, None
+
+
+def _create_embed_user(interaction: discord.Interaction) -> dict:
+    """Create user slug for embed decoration."""
+    return {
+        "name": interaction.user.display_name,
+        "id": interaction.user.id,
+        "pfp": interaction.user.avatar,
+    }
+
+
+def register_chat_commands(bot: "DiscordBot") -> None:
+    """Register chat-related commands with the bot.
+
+    Args:
+        bot: The Discord bot instance.
+    """
+
+    @bot.tree.command()
+    @app_commands.describe()
+    @count_command
+    async def help(interaction: discord.Interaction) -> None:
+        """Display a help message with available commands."""
+        await interaction.response.defer()
+
+        embed_user = _create_embed_user(interaction)
+
+        help_message = """
+    You can interact with the bot using the following commands:
+
+    ========================================
+
+    `/prompt` - Submit a prompt and get a text response. You can include an image.
+    `/create_image` - Generate an image using the AI.
+    `/upload_image` - Upload an image to the bot.
+    `/modify_image` - Modify an image using the AI.
+    `/behavior` - Alter the behavior and personality of the text AI.
+    `/clear` - Clear the bot's memory of the current channel, including images.
+    `/help` - Display this message.
+
+    ========================================
+
+    If you need help or have questions, please contact `@aghs` on Discord.
+    """
+        help_view = InfoEmbedView(
+            message=interaction.message,
+            user=embed_user,
+            title="/help",
+            description=help_message,
+            is_error=False,
+            image_data=None,
+        )
+        await help_view.initialize(interaction)
+
+    @bot.tree.command()
+    @app_commands.describe(prompt="Prompt for the AI to respond to")
+    @count_command
+    async def prompt(
+        interaction: discord.Interaction,
+        prompt: str,
+        upload: discord.Attachment | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        """Submit a prompt to the AI and receive a response.
+
+        Args:
+            interaction: The Discord interaction.
+            prompt: The prompt for the AI to respond to.
+            upload: An optional image attachment.
+            timeout: The timeout for the request in seconds.
+        """
+        await interaction.response.defer()
+
+        if timeout is None:
+            timeout = DEFAULT_PROMPT_TIMEOUT
+
+        embed_user = _create_embed_user(interaction)
+
+        try:
+            async with asyncio.timeout(timeout):
+                rate_check = await bot.rate_limiter.check(interaction.user.id, "chat")
+
+                if rate_check.allowed:
+                    images = []
+                    if upload:
+                        file_extension = upload.filename.split(".")[-1].lower()
+                        if file_extension in ["png", "jpg", "jpeg"]:
+                            file_data = await upload.read()
+                            image_b64 = base64.b64encode(file_data).decode("utf-8")
+                            image_b64 = await ai.compress_image(image_b64)
+
+                            filename_without_ext = upload.filename.rsplit(".", 1)[0]
+                            new_filename = f"{filename_without_ext}.jpeg"
+
+                            images.append({"filename": new_filename, "image": image_b64})
+                            await upload.to_file()
+                    str_images = json.dumps(images)
+
+                    await bot.repo.create_channel(interaction.channel_id)
+                    if images:
+                        await bot.repo.add_message_with_images(
+                            interaction.channel_id,
+                            "Anthropic",
+                            "prompt",
+                            False,
+                            prompt,
+                            str_images,
+                        )
+                    else:
+                        await bot.repo.add_message(
+                            interaction.channel_id, "Anthropic", "prompt", False, prompt
+                        )
+
+                    context = await bot.repo.get_visible_messages(
+                        interaction.channel_id, "All Models"
+                    )
+
+                    deactivate_old_messages = False
+                    if len(context) >= WINDOW:
+                        deactivate_old_messages = True
+                        await bot.repo.deactivate_old_messages(
+                            interaction.channel_id, "All Models", WINDOW
+                        )
+
+                    display_prompt, full_prompt_url = await handle_text_overflow(
+                        "prompt", prompt, interaction.channel_id
+                    )
+
+                    processing_message = "Thinking... (This may take up to 30 seconds)"
+                    processing_notes = [{"name": "Prompt", "value": display_prompt}]
+                    processing_view = InfoEmbedView(
+                        message=interaction.message,
+                        user=embed_user,
+                        title="Prompt Response",
+                        description=processing_message,
+                        is_error=False,
+                        image_data=(
+                            {"filename": upload.filename, "image": images[0]["image"]}
+                            if images
+                            else None
+                        ),
+                        notes=processing_notes,
+                        full_prompt_url=full_prompt_url,
+                    )
+                    await processing_view.initialize(interaction)
+
+                    display_prompt, full_prompt_url = await handle_text_overflow(
+                        "prompt", prompt, interaction.channel_id
+                    )
+
+                    response = await ai.prompt("Anthropic", "prompt", prompt, context)
+                    await bot.repo.add_message(
+                        interaction.channel_id, "Anthropic", "assistant", False, response
+                    )
+
+                    await bot.rate_limiter.record(interaction.user.id, "chat")
+
+                    if deactivate_old_messages:
+                        pass  # Could add note about pruned messages
+
+                    display_response, full_response_url = await handle_text_overflow(
+                        "response", response, interaction.channel_id
+                    )
+
+                    info_notes = [
+                        {"name": "Prompt", "value": display_prompt},
+                        {"name": "Response", "value": display_response},
+                    ]
+                    info_view = InfoEmbedView(
+                        message=interaction.message,
+                        user=embed_user,
+                        title="Prompt Response",
+                        is_error=False,
+                        image_data=(
+                            {"filename": upload.filename, "image": images[0]["image"]}
+                            if images
+                            else None
+                        ),
+                        notes=info_notes,
+                        full_response_url=full_response_url,
+                        full_prompt_url=full_prompt_url,
+                    )
+                    await info_view.initialize(interaction)
+                else:
+                    wait_msg = (
+                        f" Try again in {int(rate_check.wait_seconds)} seconds."
+                        if rate_check.wait_seconds
+                        else ""
+                    )
+                    error_message = (
+                        f"You're sending too many prompts and have been rate-limited. "
+                        f"The bot can handle a maximum of "
+                        f"{getenv('ANTHROPIC_RATE_LIMIT', '30')} `/prompt` requests "
+                        f"per hour.{wait_msg}"
+                    )
+                    error_notes = [{"name": "Prompt", "value": prompt}]
+                    error_view = InfoEmbedView(
+                        message=interaction.message,
+                        user=embed_user,
+                        title="Prompt error!",
+                        description=error_message,
+                        is_error=True,
+                        image_data=None,
+                        notes=error_notes,
+                    )
+                    await error_view.initialize(interaction)
+
+        except TimeoutError:
+            error_message = (
+                f"The request timed out after {timeout} seconds. Please try again."
+            )
+            error_notes = [{"name": "Prompt", "value": prompt}]
+            error_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Prompt error!",
+                description=error_message,
+                is_error=True,
+                image_data=None,
+                notes=error_notes,
+            )
+            await error_view.initialize(interaction)
+
+        except Exception:
+            error_message = "An unexpected error occurred while processing your request."
+            error_notes = [{"name": "Prompt", "value": prompt}]
+            error_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Prompt error!",
+                description=error_message,
+                is_error=True,
+                image_data=None,
+                notes=error_notes,
+            )
+            await error_view.initialize(interaction)
+
+    @bot.tree.command()
+    @app_commands.describe(prompt="Description of the personality of the AI")
+    @count_command
+    async def behavior(
+        interaction: discord.Interaction,
+        prompt: str,
+        timeout: float | None = None,
+    ) -> None:
+        """Submit a behavior change prompt for future AI responses.
+
+        Args:
+            interaction: The Discord interaction.
+            prompt: The behavior change prompt.
+            timeout: The timeout for the request in seconds.
+        """
+        await interaction.response.defer()
+
+        if timeout is None:
+            timeout = DEFAULT_PROMPT_TIMEOUT
+
+        embed_user = _create_embed_user(interaction)
+
+        try:
+            async with asyncio.timeout(timeout):
+                await bot.repo.create_channel(interaction.channel_id)
+                await bot.repo.add_message(
+                    interaction.channel_id, "Anthropic", "behavior", False, prompt
+                )
+
+                context = await bot.repo.get_visible_messages(
+                    interaction.channel_id, "All Models"
+                )
+
+                display_prompt, full_prompt_url = await handle_text_overflow(
+                    "prompt", prompt, interaction.channel_id
+                )
+
+                processing_message = (
+                    "Updating behavior... (This may take up to 30 seconds)"
+                )
+                processing_notes = [{"name": "Prompt", "value": display_prompt}]
+                processing_view = InfoEmbedView(
+                    message=interaction.message,
+                    user=embed_user,
+                    title="Behavior Update",
+                    description=processing_message,
+                    is_error=False,
+                    notes=processing_notes,
+                    full_prompt_url=full_prompt_url,
+                )
+                await processing_view.initialize(interaction)
+
+                response = await ai.prompt("Anthropic", "behavior", prompt, context)
+                await bot.repo.add_message(
+                    interaction.channel_id, "Anthropic", "assistant", False, response
+                )
+
+                display_response, full_response_url = await handle_text_overflow(
+                    "response", response, interaction.channel_id
+                )
+
+                success_notes = [
+                    {"name": "Behavior Instructions", "value": display_prompt},
+                    {"name": "AI Acknowledgment", "value": display_response},
+                ]
+                success_view = InfoEmbedView(
+                    message=interaction.message,
+                    user=embed_user,
+                    title="Behavior Updated",
+                    is_error=False,
+                    notes=success_notes,
+                    full_response_url=full_response_url,
+                    full_prompt_url=full_prompt_url,
+                )
+                await success_view.initialize(interaction)
+
+        except TimeoutError:
+            error_message = (
+                f"The request timed out after {timeout} seconds. Please try again."
+            )
+            error_notes = [{"name": "Prompt", "value": prompt}]
+            error_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Behavior error!",
+                description=error_message,
+                is_error=True,
+                image_data=None,
+                notes=error_notes,
+            )
+            await error_view.initialize(interaction)
+
+        except Exception:
+            error_message = "An unexpected error occurred while processing your request."
+            error_notes = [{"name": "Prompt", "value": prompt}]
+            error_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Behavior error!",
+                description=error_message,
+                is_error=True,
+                image_data=None,
+                notes=error_notes,
+            )
+            await error_view.initialize(interaction)
+
+    @bot.tree.command()
+    @app_commands.describe()
+    @count_command
+    async def clear(
+        interaction: discord.Interaction,
+        timeout: float | None = None,
+    ) -> None:
+        """Clear the bot's memory of the current channel.
+
+        Args:
+            interaction: The Discord interaction.
+            timeout: The timeout for the operation in seconds.
+        """
+        await interaction.response.defer()
+
+        if timeout is None:
+            timeout = DEFAULT_CLEAR_TIMEOUT
+
+        embed_user = _create_embed_user(interaction)
+
+        async def on_clear_selection(
+            clear_interaction: discord.Interaction,
+            user: dict,
+            confirmed: bool,
+        ) -> None:
+            if confirmed:
+                await bot.repo.deactivate_all_messages(interaction.channel_id)
+                success_message = (
+                    "The bot's memory for this channel has been cleared. "
+                    "All prior messages and images have been forgotten."
+                )
+                success_view = InfoEmbedView(
+                    message=interaction.message,
+                    user=embed_user,
+                    title="History Cleared",
+                    description=success_message,
+                    is_error=False,
+                    image_data=None,
+                )
+                await success_view.initialize(clear_interaction)
+            else:
+                cancel_message = "History clear operation was cancelled."
+                cancel_view = InfoEmbedView(
+                    message=interaction.message,
+                    user=embed_user,
+                    title="Operation Cancelled",
+                    description=cancel_message,
+                    is_error=False,
+                    image_data=None,
+                )
+                await cancel_view.initialize(clear_interaction)
+
+        confirmation_view = ClearHistoryConfirmationView(
+            interaction=interaction,
+            user=embed_user,
+            on_select=on_clear_selection,
+        )
+        await confirmation_view.initialize(interaction)
