@@ -1,164 +1,152 @@
+# Agent Operating Guide
+
 ## Issue Tracking with bd (beads)
 
-**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
+**CRITICAL**: Use **bd** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
 
 ### Why bd?
+- Dependency-aware with blocker relationships
+- Git-friendly via `.beads/issues.jsonl` auto-sync
+- Agent-optimized with JSON output and ready work detection
 
-- Dependency-aware: Track blockers and relationships between issues
-- Git-friendly: Auto-syncs to JSONL for version control
-- Agent-optimized: JSON output, ready work detection, discovered-from links
-- Prevents duplicate tracking systems and confusion
+### Core Commands
 
-### Quick Start
-
-**Check for ready work:**
 ```bash
-bd ready --json
-```
-
-**Create new issues:**
-```bash
-bd create "Issue title" -t bug|feature|task -p 0-4 --json
-bd create "Issue title" -p 1 --deps discovered-from:bd-123 --json
-bd create "Subtask" --parent <epic-id> --json  # Hierarchical subtask (gets ID like epic-id.1)
-```
-
-**Claim and update:**
-```bash
+bd ready --json                                    # Find unblocked work
+bd create "Title" -t bug|feature|task|epic|chore -p 0-4 --json
+bd create "Found during work" --deps discovered-from:bd-123 --json
+bd create "Subtask" --parent <epic-id> --json      # Hierarchical
 bd update bd-42 --status in_progress --json
-bd update bd-42 --priority 1 --json
-```
-
-**Complete work:**
-```bash
 bd close bd-42 --reason "Completed" --json
 ```
 
-### Issue Types
-
-- `bug` - Something broken
-- `feature` - New functionality
-- `task` - Work item (tests, docs, refactoring)
-- `epic` - Large feature with subtasks
-- `chore` - Maintenance (dependencies, tooling)
-
 ### Priorities
+- `0` Critical (security, data loss, broken builds)
+- `1` High (major features, important bugs)
+- `2` Medium (default)
+- `3` Low (polish)
+- `4` Backlog
 
-- `0` - Critical (security, data loss, broken builds)
-- `1` - High (major features, important bugs)
-- `2` - Medium (default, nice-to-have)
-- `3` - Low (polish, optimization)
-- `4` - Backlog (future ideas)
+### MCP Server
+If available, prefer `mcp__beads__*` functions over CLI.
 
-### Workflow for AI Agents
+### Rules
+- Always use `--json` flag for programmatic use
+- Always commit `.beads/issues.jsonl` with code changes
+- Run `bd <cmd> --help` to discover flags
+- Store AI planning docs in `history/` directory
+- Do NOT create markdown TODO lists or duplicate trackers
 
-1. **Check ready work**: `bd ready` shows unblocked issues
-2. **Claim your task**: `bd update <id> --status in_progress`
-3. **Work on it**: Implement, test, document
-4. **Discover new work?** Create linked issue:
-   - `bd create "Found bug" -p 1 --deps discovered-from:<parent-id>`
-5. **Complete**: `bd close <id> --reason "Done"`
-6. **Commit together**: Always commit the `.beads/issues.jsonl` file together with the code changes so issue state stays in sync with code state
+---
 
-### Auto-Sync
+## Session Types
 
-bd automatically syncs with git:
-- Exports to `.beads/issues.jsonl` after changes (5s debounce)
-- Imports from JSONL when newer (e.g., after `git pull`)
-- No manual export/import needed!
+### Initializer Agent
+Runs once per bead to establish context and plan. **Read-only.**
 
-### MCP Server (Recommended)
+**Startup:**
+1. `bd ready --json` - identify target bead
+2. Read `docs/data-model.md` if data changes involved
+3. `git log --oneline -10` - understand recent changes
+4. `pytest -x --tb=short` - verify baseline health
+5. Create `history/<bead-id>-plan.md` with implementation steps
 
-If using Claude or MCP-compatible clients, install the beads MCP server:
+**Output:** Implementation plan, test scenarios, acceptance criteria.
 
-```bash
-pip install beads-mcp
-```
+**Do NOT:** Write code, modify files, or commit.
 
-Add to MCP config (e.g., `~/.config/claude/config.json`):
-```json
-{
-  "beads": {
-    "command": "beads-mcp",
-    "args": []
-  }
-}
-```
+---
 
-Then use `mcp__beads__*` functions instead of CLI commands.
+### Coding Agent
+Executes planned work incrementally.
 
-### Managing AI-Generated Planning Documents
+**Startup:**
+1. Read `history/<bead-id>-plan.md`
+2. Read `history/<bead-id>-progress.md` if exists
+3. `pytest -x --tb=short` - verify baseline
+4. Select next incomplete task
 
-AI assistants often create planning and design documents during development:
-- PLAN.md, IMPLEMENTATION.md, ARCHITECTURE.md
-- DESIGN.md, CODEBASE_SUMMARY.md, INTEGRATION_PLAN.md
-- TESTING_GUIDE.md, TECHNICAL_DESIGN.md, and similar files
+**Work loop:**
+1. Implement ONE task
+2. Run relevant tests
+3. Pass? Commit with `[BD-<id>] <description>`
+4. Update `history/<bead-id>-progress.md`
+5. Fail? Fix or revert, do not proceed
 
-**Best Practice: Use a dedicated directory for these ephemeral files**
+**Session end:** All changes committed or reverted, progress updated.
 
-**Recommended approach:**
-- Create a `history/` directory in the project root
-- Store ALL AI-generated planning/design docs in `history/`
-- Keep the repository root clean and focused on permanent project files
-- Only access `history/` when explicitly asked to review past planning
+---
 
-**Example .gitignore entry (optional):**
-```
-# AI planning documents (ephemeral)
-history/
-```
+## Context Management
 
-**Benefits:**
-- ✅ Clean repository root
-- ✅ Clear separation between ephemeral and permanent documentation
-- ✅ Easy to exclude from version control if desired
-- ✅ Preserves planning history for  archeological research
-- ✅ Reduces noise when browsing the project
+### Token Efficiency
+- Do NOT re-read files already in context
+- Use `repomix bundle` output when provided
+- Prefer targeted reads over broad searches
+- State assumptions explicitly
 
-### CLI Help
+### Recovery Protocol
+If unexpected state:
+1. `git status` - uncommitted changes?
+2. `git diff` - review pending changes
+3. `pytest -x` - test health
+4. If broken: `git checkout .` and restart
 
-Run `bd <command> --help` to see all available flags for any command.
-For example: `bd create --help` shows `--parent`, `--deps`, `--assignee`, etc.
+---
 
-### Important Rules
+## Decision Framework
 
-- ✅ Use bd for ALL task tracking
-- ✅ Always use `--json` flag for programmatic use
-- ✅ Link discovered work with `discovered-from` dependencies
-- ✅ Check `bd ready` before asking "what should I work on?"
-- ✅ Store AI planning docs in `history/` directory
-- ✅ Run `bd <cmd> --help` to discover available flags
-- ❌ Do NOT create markdown TODO lists
-- ❌ Do NOT use external issue trackers
-- ❌ Do NOT duplicate tracking systems
-- ❌ Do NOT clutter repo root with planning documents
+### Before Modifying Code
+1. Is this in the plan? If not, update plan first.
+2. How will I test this?
+3. Does this touch data model? Update `docs/data-model.md` first.
+4. Will this break existing clients?
 
-### Session Ending Protocol
+### Observability Checklist
+For new features:
+- [ ] Structured log at operation start/end
+- [ ] Error logging with context
+- [ ] Metric/counter for success/failure
+- [ ] Health check endpoint if applicable
 
-1. File/update issues for remaining work
+### Test Requirements
+- Unit tests for pure functions
+- Integration tests for DB operations
+- Client tests can mock core services
+- No mocking within module under test
 
-    Agents should proactively create issues for discovered bugs, TODOs, and follow-up tasks
-    Close completed issues and update status for in-progress work
+---
 
-2. Run quality gates (if applicable)
+## Session Ending Protocol
 
-    Tests, linters, builds - only if code changes were made
-    File P0 issues if builds are broken
+1. **File issues for remaining work**
+   - Create issues for discovered bugs/TODOs
+   - Close completed, update in-progress
 
-3. Sync the issue tracker carefully
+2. **Run quality gates** (if code changed)
+   - Tests, linters, builds
+   - P0 issue if build broken
 
-    Work methodically to ensure local and remote issues merge safely
-    Handle git conflicts thoughtfully (sometimes accepting remote and re-importing)
-    Goal: clean reconciliation where no issues are lost
+3. **Sync issue tracker**
+   - Commit `.beads/issues.jsonl` with changes
+   - Handle conflicts carefully
 
-4. Verify clean state
+4. **Verify clean state**
+   - All changes committed
+   - No untracked files
 
-    All changes committed and pushed
-    No untracked files remain
+5. **Document next steps**
+   - Update progress file
+   - Note blockers or questions
 
-5. Choose next work
+---
 
-    Provide a formatted prompt for the next session with context
+## Anti-Patterns
 
-
-For more details, see README.md and QUICKSTART.md.
+- Starting implementation without reading the plan
+- Multiple unrelated changes in one session
+- Skipping tests to "move faster"
+- Modifying data model without updating docs
+- Hardcoding configurable values
+- Adding features not in bead spec
+- Guessing when blocked (ask instead)
