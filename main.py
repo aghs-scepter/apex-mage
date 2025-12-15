@@ -11,6 +11,9 @@ import ai
 import mem
 import carousel as carousel
 
+# Configure root logger to output to stdout (for Docker logs)
+logging.basicConfig(level=logging.INFO)
+
 # Timeout constants
 DEFAULT_CLEAR_TIMEOUT = 60.0
 DEFAULT_PROMPT_TIMEOUT = 240.0
