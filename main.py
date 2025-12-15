@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import functools
 from typing import Optional, List, Tuple
 from os import getenv
 import json
@@ -46,6 +47,19 @@ async def handle_text_overflow(text_type: str, text: str, channel_id: int) -> Tu
             return modified_text, None
     else:
         return text, None
+
+# Global command counter (resets on restart)
+_command_count = 0
+
+def count_command(func):
+    """Decorator that increments and logs the global command counter."""
+    @functools.wraps(func)
+    async def wrapper(interaction: discord.Interaction, *args, **kwargs):
+        global _command_count
+        _command_count += 1
+        logging.info(f"Command '{func.__name__}' invoked. Count: {_command_count}")
+        return await func(interaction, *args, **kwargs)
+    return wrapper
 
 class DiscordAiClient(discord.Client):
     """
@@ -107,6 +121,7 @@ async def on_ready():
 
 @client.tree.command()
 @app_commands.describe()
+@count_command
 async def help(interaction: discord.Interaction):
     """
     Display a help message with available commands.
@@ -142,6 +157,7 @@ async def help(interaction: discord.Interaction):
 
 @client.tree.command()
 @app_commands.describe(image="Image file to upload to the bot")
+@count_command
 async def upload_image(interaction: discord.Interaction, image: discord.Attachment):
     """
     Upload an image to the bot for use in future prompting and image generation.
@@ -191,6 +207,7 @@ async def upload_image(interaction: discord.Interaction, image: discord.Attachme
     
 @client.tree.command()
 @app_commands.describe(prompt='Prompt for the AI to respond to')
+@count_command
 async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional[discord.Attachment] = None, timeout: Optional[float] = None):
     """
     Submit a prompt to the AI and receive a response.
@@ -347,6 +364,7 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
 
 @client.tree.command()
 @app_commands.describe(prompt='Description of the image you want to generate')
+@count_command
 async def create_image(interaction: discord.Interaction, prompt: str, timeout: Optional[float] = None):
     """
     Submit an image gen request to the AI and receive a response as a file attachment.
@@ -490,6 +508,7 @@ async def create_image(interaction: discord.Interaction, prompt: str, timeout: O
 
 @client.tree.command()
 @app_commands.describe(prompt='Description of the personality of the AI')
+@count_command
 async def behavior(interaction: discord.Interaction, prompt: str, timeout: Optional[float] = None):
     """
     Submit a behavior change prompt to the AI which will take effect for future prompts.
@@ -569,6 +588,7 @@ async def behavior(interaction: discord.Interaction, prompt: str, timeout: Optio
 
 @client.tree.command()
 @app_commands.describe()
+@count_command
 async def clear(interaction: discord.Interaction, timeout: Optional[float] = None):
     """
     Clear the bot's context for the current channel, starting with empty context and default behavior.
@@ -630,6 +650,7 @@ async def clear(interaction: discord.Interaction, timeout: Optional[float] = Non
     
 @client.tree.command()
 @app_commands.describe()
+@count_command
 async def modify_image(interaction: discord.Interaction, timeout: Optional[float] = None):
     """
     Select a recent image to modify using the AI. This command can accept images through a few avenues:
