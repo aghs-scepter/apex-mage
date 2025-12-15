@@ -3,19 +3,21 @@
 import asyncio
 import base64
 import io
-import logging
 from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
 import discord
 
 from src.core.image_utils import compress_image, image_strip_headers
+from src.core.logging import get_logger
 from src.core.providers import ImageRequest
 
 if TYPE_CHECKING:
     from src.adapters.repository_compat import RepositoryAdapter
     from src.core.providers import ImageProvider
     from src.core.rate_limit import SlidingWindowRateLimiter
+
+logger = get_logger(__name__)
 
 EMBED_COLOR_ERROR = 0xE91515
 EMBED_COLOR_INFO = 0x3498DB
@@ -279,7 +281,7 @@ class ImageSelectionTypeView(discord.ui.View):
             )
 
         self.update_buttons(has_previous_image, has_recent_images)
-        logging.debug("ImageSelectionTypeModal embed created successfully.")
+        logger.debug("embed_created", view="ImageSelectionTypeModal")
 
         self.message = await interaction.followup.send(
             embed=self.embed,
@@ -287,7 +289,7 @@ class ImageSelectionTypeView(discord.ui.View):
             wait=True,
         )
 
-        logging.debug("ImageSelectionTypeModal initialized successfully.")
+        logger.debug("view_initialized", view="ImageSelectionTypeModal")
 
     def update_buttons(
         self, has_previous_image: bool, has_recent_images: bool
@@ -401,13 +403,11 @@ class ImageCarouselView(discord.ui.View):
                 "Add or generate an image to use this feature.",
             )
             self.hide_buttons()
-            logging.error(
-                "No files provided to ImageCarouselView at startup; Error embed created."
-            )
+            logger.error("carousel_no_files", view="ImageCarouselView")
         else:
             self.embed, self.embed_image = await self.create_embed(interaction)
             self.update_buttons()
-            logging.debug("ImageCarouselView embed created successfully.")
+            logger.debug("embed_created", view="ImageCarouselView")
 
         if self.message:
             if self.embed_image:
@@ -421,7 +421,7 @@ class ImageCarouselView(discord.ui.View):
                     embed=self.embed,
                     view=self,
                 )
-        logging.debug("ImageCarouselView initialized successfully.")
+        logger.debug("view_initialized", view="ImageCarouselView")
 
     def generate_image_chrono_bar(self, current_index: int, total: int) -> str:
         """Generate a visual position indicator for the carousel."""
@@ -588,7 +588,7 @@ class ImageEditTypeView(discord.ui.View):
         self.embed: discord.Embed | None = None
         self.message = message
         self.on_select = on_select
-        logging.debug("ImageEditTypeView initialized")
+        logger.debug("view_initialized", view="ImageEditTypeView")
 
     async def initialize(self, interaction: discord.Interaction) -> None:
         """Initialize the view with the image and buttons."""
@@ -610,19 +610,19 @@ class ImageEditTypeView(discord.ui.View):
                 attachments=[embed_image],
                 view=self,
             )
-        logging.debug("ImageEditTypeView embed created and displayed")
+        logger.debug("embed_displayed", view="ImageEditTypeView")
 
     def disable_buttons(self) -> None:
         """Disable all buttons in the view."""
         for child in self.children:
             if isinstance(child, discord.ui.Button):
                 child.disabled = True
-        logging.debug("All buttons disabled")
+        logger.debug("buttons_disabled", view="ImageEditTypeView")
 
     def hide_buttons(self) -> None:
         """Remove all buttons from the view."""
         self.clear_items()
-        logging.debug("All buttons hidden")
+        logger.debug("buttons_hidden", view="ImageEditTypeView")
 
     @discord.ui.button(label="Adjust", style=discord.ButtonStyle.primary, row=0)
     async def adjust_button(
@@ -767,7 +767,7 @@ class ImageEditPromptModal(discord.ui.Modal, title="Image Edit Instructions"):
     async def on_error(
         self, interaction: discord.Interaction, error: Exception
     ) -> None:
-        logging.error(f"Error in ImageEditPromptModal: {error}")
+        logger.error("modal_error", view="ImageEditPromptModal", error=str(error))
 
         try:
             await interaction.response.send_message(
@@ -891,7 +891,7 @@ class ImageEditPerformView(discord.ui.View):
                 await self.on_complete(self.interaction, image_return)
 
         except Exception as ex:
-            logging.error(f"Error in image edit: {ex}")
+            logger.error("image_edit_error", error=str(ex))
             error_data = {
                 "error": True,
                 "message": f"An error occurred while modifying the image: {ex}",

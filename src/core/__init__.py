@@ -6,10 +6,33 @@ for AI providers and other core functionality.
 
 from src.core.carousel_logic import CarouselController, CarouselState
 from src.core.conversation import ContextBuilder, ConversationContext
+from src.core.errors import (
+    ErrorCategory,
+    PermanentError,
+    TransientError,
+    classify_error,
+    is_retryable,
+    retry_with_backoff,
+)
+from src.core.health import (
+    HealthChecker,
+    HealthReport,
+    HealthServer,
+    ServiceCheck,
+    ServiceStatus,
+    start_health_server,
+)
 from src.core.image_utils import (
     compress_image,
     format_image_response,
     image_strip_headers,
+)
+from src.core.logging import (
+    bind_contextvars,
+    clear_contextvars,
+    configure_logging,
+    get_logger,
+    unbind_contextvars,
 )
 from src.core.providers import (
     AIProvider,
@@ -36,6 +59,20 @@ __all__ = [
     "AIProvider",
     "ChatMessage",
     "ChatResponse",
+    # Error handling
+    "ErrorCategory",
+    "PermanentError",
+    "TransientError",
+    "classify_error",
+    "is_retryable",
+    "retry_with_backoff",
+    # Health checks
+    "HealthChecker",
+    "HealthReport",
+    "HealthServer",
+    "ServiceCheck",
+    "ServiceStatus",
+    "start_health_server",
     # Image providers
     "GeneratedImage",
     "ImageModifyRequest",
@@ -48,6 +85,12 @@ __all__ = [
     # Conversation context
     "ContextBuilder",
     "ConversationContext",
+    # Logging
+    "bind_contextvars",
+    "clear_contextvars",
+    "configure_logging",
+    "get_logger",
+    "unbind_contextvars",
     # Rate limiting
     "InMemoryRateLimitStorage",
     "RateLimit",

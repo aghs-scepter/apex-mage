@@ -1,6 +1,5 @@
 """Discord bot core - setup and lifecycle management."""
 
-import logging
 from os import getenv
 from typing import TYPE_CHECKING
 
@@ -8,6 +7,9 @@ import discord
 from discord import app_commands
 
 from src.adapters import GCSAdapter, RepositoryAdapter, SQLiteRepository
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
 from src.core.conversation import ContextBuilder
 from src.core.rate_limit import (
     InMemoryRateLimitStorage,
@@ -104,20 +106,20 @@ class DiscordBot(discord.Client):
         await self._repository.connect()
         self._repo_adapter = RepositoryAdapter(self._repository)
         await self._repo_adapter.validate_vendors()
-        logging.info("Repository initialized and vendors validated.")
+        logger.info("repository_initialized", db_path="data/app.db")
 
         # Initialize AI providers
         self._ai_provider = AnthropicProvider(api_key=getenv("ANTHROPIC_API_KEY"))
         self._image_provider = FalAIProvider(api_key=getenv("FAL_KEY"))
-        logging.info("AI providers initialized.")
+        logger.info("ai_providers_initialized", providers=["anthropic", "fal"])
 
         # Initialize GCS adapter for cloud storage uploads
         self._gcs_adapter = GCSAdapter()
-        logging.info("GCS adapter initialized.")
+        logger.info("gcs_adapter_initialized")
 
         # Initialize context builder for conversation windowing
         self._context_builder = ContextBuilder(max_messages=50, max_tokens=100000)
-        logging.info("Context builder initialized.")
+        logger.info("context_builder_initialized", max_messages=50, max_tokens=100000)
 
         # Initialize rate limiter with in-memory storage
         chat_rate_limit = int(getenv("ANTHROPIC_RATE_LIMIT", "30"))
@@ -130,7 +132,11 @@ class DiscordBot(discord.Client):
                 "image": RateLimit(max_requests=image_rate_limit, window_seconds=3600),
             },
         )
-        logging.info("Rate limiter initialized.")
+        logger.info(
+            "rate_limiter_initialized",
+            chat_limit=chat_rate_limit,
+            image_limit=image_rate_limit,
+        )
 
         # Sync commands with Discord
         await self.tree.sync()
@@ -139,7 +145,7 @@ class DiscordBot(discord.Client):
         """Clean up resources when the client is closing."""
         if self._repository is not None:
             await self._repository.close()
-            logging.info("Repository connection closed.")
+            logger.info("repository_closed")
         await super().close()
 
     async def register_commands(self, guild: discord.Guild) -> None:
@@ -152,7 +158,7 @@ class DiscordBot(discord.Client):
         await self.change_presence(
             activity=discord.CustomActivity(name="/help for commands")
         )
-        logging.info(f"Registered commands for guild: {guild.name} (ID: {guild.id})")
+        logger.info("commands_registered", guild=guild.name, guild_id=guild.id)
 
     async def on_guild_join(self, guild: discord.Guild) -> None:
         """Handle command registration when joining a new guild.
@@ -161,7 +167,7 @@ class DiscordBot(discord.Client):
             guild: The guild the bot has joined.
         """
         await self.register_commands(guild)
-        logging.info(f"Joined new guild: {guild.name} (ID: {guild.id})")
+        logger.info("guild_joined", guild=guild.name, guild_id=guild.id)
 
 
 def create_bot() -> DiscordBot:
