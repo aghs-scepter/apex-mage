@@ -1,0 +1,1 @@
+"""Apex Mage core package."""
