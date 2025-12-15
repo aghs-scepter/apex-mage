@@ -8,8 +8,8 @@ import discord
 import logging
 from discord import app_commands
 import ai
-import mem
 import carousel as carousel
+from src.adapters import RepositoryAdapter, SQLiteRepository, WINDOW
 
 # Configure root logger to output to stdout (for Docker logs)
 logging.basicConfig(level=logging.INFO)
@@ -70,6 +70,8 @@ class DiscordAiClient(discord.Client):
 
     Attributes:
     tree (app_commands.CommandTree): The command tree for the bot.
+    _repository (SQLiteRepository): The database repository.
+    _repo_adapter (RepositoryAdapter): The repository adapter for mem.py compatibility.
     """
     def __init__(self):
         """
@@ -80,13 +82,39 @@ class DiscordAiClient(discord.Client):
         intents.dm_messages = True # Add intent to allow direct messages/PMs
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
+        self._repository: Optional[SQLiteRepository] = None
+        self._repo_adapter: Optional[RepositoryAdapter] = None
+
+    @property
+    def repo(self) -> RepositoryAdapter:
+        """Get the repository adapter, raising if not initialized."""
+        if self._repo_adapter is None:
+            raise RuntimeError("Repository not initialized. setup_hook must complete first.")
+        return self._repo_adapter
 
     async def setup_hook(self):
         """
-        Synchronizes the command tree with Discord.
+        Initialize the repository and synchronize the command tree with Discord.
         """
+        # Initialize repository
+        self._repository = SQLiteRepository("data/app.db")
+        await self._repository.connect()
+        self._repo_adapter = RepositoryAdapter(self._repository)
+        await self._repo_adapter.validate_vendors()
+        logging.info("Repository initialized and vendors validated.")
+
         # Check if commands are already registered
         await self.tree.sync()
+
+    async def close(self):
+        """
+        Clean up resources when the client is closing.
+        """
+        # Close repository connection
+        if self._repository is not None:
+            await self._repository.close()
+            logging.info("Repository connection closed.")
+        await super().close()
     
     async def register_commands(self, guild: discord.Guild):
         """
@@ -110,7 +138,6 @@ class DiscordAiClient(discord.Client):
         print(f"Joined new guild: {guild.name} (ID: {guild.id})")
 
 client = DiscordAiClient()
-mem.validate_vendors() # Validate vendors on bot startup
 
 @client.event
 async def on_ready():
@@ -193,9 +220,9 @@ async def upload_image(interaction: discord.Interaction, image: discord.Attachme
         str_images = json.dumps(images)
 
         # Create the origin channel if it doesn't exist in the DB, then add the uploaded image as a message
-        mem.create_channel(interaction.channel.id)
+        await client.repo.create_channel(interaction.channel.id)
         # Include images if required - image uploads are optional when calling this command
-        mem.add_message_with_images(interaction.channel.id, 'Anthropic', 'prompt', False, "Uploaded Image", str_images)
+        await client.repo.add_message_with_images(interaction.channel.id, 'Anthropic', 'prompt', False, "Uploaded Image", str_images)
 
         # Create a success message as an embed in Discord
         success_message = "This image was uploaded successfully. You can use it for future `/prompt` and `/modify_image` commands."
@@ -236,7 +263,7 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
     try:
         async with asyncio.timeout(timeout):
             # Check if channel is within or outside of prompt rate limits
-            within_rate_limit = await mem.enforce_text_rate_limits(interaction.channel.id)
+            within_rate_limit = await client.repo.enforce_text_rate_limits(interaction.channel.id)
 
             if within_rate_limit:
                 # Process any images attached to the prompt into a list of b64 encoded strings
@@ -258,21 +285,21 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                 str_images = json.dumps(images)
 
                 # Create the origin channel if it doesn't exist in the DB, then add the prompt message
-                mem.create_channel(interaction.channel.id)
+                await client.repo.create_channel(interaction.channel.id)
                 # Include images if required - image uploads are optional when calling this command
                 if images:
-                    mem.add_message_with_images(interaction.channel.id, 'Anthropic', 'prompt', False, prompt, str_images)
+                    await client.repo.add_message_with_images(interaction.channel.id, 'Anthropic', 'prompt', False, prompt, str_images)
                 else:
-                    mem.add_message(interaction.channel.id, 'Anthropic', 'prompt', False, prompt)
+                    await client.repo.add_message(interaction.channel.id, 'Anthropic', 'prompt', False, prompt)
 
                 # Get messages used as context for the prompt
-                context = mem.get_visible_messages(interaction.channel.id, 'All Models')
+                context = await client.repo.get_visible_messages(interaction.channel.id, 'All Models')
 
                 # Determine if we need to deactivate old messages
                 deactivate_old_messages = False
-                if len(context) >= mem.WINDOW:
+                if len(context) >= WINDOW:
                     deactivate_old_messages = True # Use this to notify user that old messages were pruned
-                    mem.deactivate_old_messages(interaction.channel.id, 'All Models', mem.WINDOW)
+                    await client.repo.deactivate_old_messages(interaction.channel.id, 'All Models', WINDOW)
                 
                 # Process the prompt for potential overflow before showing the processing message
                 display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
@@ -299,7 +326,7 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                 
                 # Get the AI response and record it in the database
                 response = await ai.prompt('Anthropic', 'prompt', prompt, context)
-                mem.add_message(interaction.channel.id, 'Anthropic', "assistant", False, response)
+                await client.repo.add_message(interaction.channel.id, 'Anthropic', "assistant", False, response)
                 
                 # If old messages needed to be deactivated, notify the user
                 if deactivate_old_messages:
@@ -392,15 +419,15 @@ async def create_image(interaction: discord.Interaction, prompt: str, timeout: O
     try:
         async with asyncio.timeout(timeout):
             # Check if channel is within or outside of prompt rate limits
-            within_rate_limit = await mem.enforce_image_rate_limits(interaction.channel.id)
+            within_rate_limit = await client.repo.enforce_image_rate_limits(interaction.channel.id)
 
             if within_rate_limit:
                 # Process the prompt for potential overflow
                 display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
-                
+
                 # Create the origin channel if it doesn't exist in the DB, then add the prompt message
-                mem.create_channel(interaction.channel.id)
-                mem.add_message(interaction.channel.id, 'Fal.AI', 'prompt', True, prompt)
+                await client.repo.create_channel(interaction.channel.id)
+                await client.repo.add_message(interaction.channel.id, 'Fal.AI', 'prompt', True, prompt)
 
                 # Display a "processing" message while the image is being redrawn
                 processing_message = "Generating an image... (This may take up to 180 seconds)"
@@ -424,7 +451,7 @@ async def create_image(interaction: discord.Interaction, prompt: str, timeout: O
                 image_data = await ai.compress_image(image_data) # Compress the image to reduce token count
                 str_image = json.dumps([{ "filename": "image.jpeg", "image": image_data }])
                 # Dear reader, I am so sorry for this. But Anthropic's API freaks the fuck out if you specify that a bot, rather than a user, uploaded an image as context.
-                mem.add_message_with_images(interaction.channel.id, 'Fal.AI', "prompt", False, "Image", str_image)
+                await client.repo.add_message_with_images(interaction.channel.id, 'Fal.AI', "prompt", False, "Image", str_image)
                 
                 # Format the image response as a Discord file object
                 output_filename, output_file = await ai.format_image_response(image_data, "jpeg", response["has_nsfw_concepts"]) # Fal.AI returns jpeg-format image files
@@ -536,11 +563,11 @@ async def behavior(interaction: discord.Interaction, prompt: str, timeout: Optio
     try:
         async with asyncio.timeout(timeout):
             # Create the origin channel if it doesn't exist in the DB, then add the prompt message
-            mem.create_channel(interaction.channel.id)
-            mem.add_message(interaction.channel.id, 'Anthropic', 'behavior', False, prompt)
+            await client.repo.create_channel(interaction.channel.id)
+            await client.repo.add_message(interaction.channel.id, 'Anthropic', 'behavior', False, prompt)
 
             # Get messages used as context for the prompt
-            context = mem.get_visible_messages(interaction.channel.id, 'All Models')
+            context = await client.repo.get_visible_messages(interaction.channel.id, 'All Models')
 
             # Process the prompt for potential overflow before showing any processing message
             display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
@@ -563,7 +590,7 @@ async def behavior(interaction: discord.Interaction, prompt: str, timeout: Optio
 
             # Record the behavior change in the database. This is a little weird, but is stored as a "message" for consistency.
             response = await ai.prompt('Anthropic', 'behavior', prompt, context)
-            mem.add_message(interaction.channel.id, 'Anthropic', "assistant", False, response)
+            await client.repo.add_message(interaction.channel.id, 'Anthropic', "assistant", False, response)
 
             # Update the deferred message with the prompt text and acknowledgement of the behavior change
             success_message = "The bot's behavior has been updated. Future responses will reflect this change."
@@ -624,8 +651,8 @@ async def clear(interaction: discord.Interaction, timeout: Optional[float] = Non
             async with asyncio.timeout(timeout):
                 if confirm_clear:
                     # Create the origin channel if it doesn't exist in the DB, then clear any existing context
-                    mem.create_channel(interaction.channel.id)
-                    mem.clear_messages(interaction.channel.id, 'All Models')
+                    await client.repo.create_channel(interaction.channel.id)
+                    await client.repo.clear_messages(interaction.channel.id, 'All Models')
 
                     # Update the deferred message with a confirmation that the bot's context has been cleared
                     success_message = "History cleared. The bot has forgotten previous messages and has been reset to default behavior."
@@ -738,7 +765,7 @@ async def modify_image(interaction: discord.Interaction, timeout: Optional[float
             image_selection_result.set_result(selected_image)
         
         # Get the latest images from the database and format them for the carousel view
-        latest_images = mem.get_latest_images(interaction.channel.id, "All Models", 5)
+        latest_images = await client.repo.get_latest_images(interaction.channel.id, "All Models", 5)
         image_files = await ai.format_latest_images_list(latest_images)
 
         selector_view = carousel.ImageCarouselView(
@@ -833,7 +860,7 @@ async def modify_image(interaction: discord.Interaction, timeout: Optional[float
         
         str_image = json.dumps([image_redraw])
         # Dear reader, I am so sorry for this. But Anthropic's API freaks the fuck out if you specify that a bot, rather than a user, uploaded an image as context.
-        mem.add_message_with_images(interaction.channel.id, 'Fal.AI', "prompt", False, "Modified Image", str_image)
+        await client.repo.add_message_with_images(interaction.channel.id, 'Fal.AI', "prompt", False, "Modified Image", str_image)
     
         # Create an embed containing the final product of the image redraw
         success_message = "Image modification complete."
