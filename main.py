@@ -1,7 +1,7 @@
 import asyncio
 import base64
 import functools
-from typing import Optional, List, Tuple
+from typing import Optional, Tuple, TYPE_CHECKING
 from os import getenv
 import json
 import discord
@@ -10,6 +10,12 @@ from discord import app_commands
 import ai
 import carousel as carousel
 from src.adapters import RepositoryAdapter, SQLiteRepository, WINDOW
+from src.providers.anthropic_provider import AnthropicProvider
+from src.providers.fal_provider import FalAIProvider
+from src.core.providers import ImageRequest
+
+if TYPE_CHECKING:
+    from src.core.providers import AIProvider, ImageProvider
 
 # Configure root logger to output to stdout (for Docker logs)
 logging.basicConfig(level=logging.INFO)
@@ -84,6 +90,8 @@ class DiscordAiClient(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self._repository: Optional[SQLiteRepository] = None
         self._repo_adapter: Optional[RepositoryAdapter] = None
+        self._ai_provider: Optional["AIProvider"] = None
+        self._image_provider: Optional["ImageProvider"] = None
 
     @property
     def repo(self) -> RepositoryAdapter:
@@ -92,9 +100,23 @@ class DiscordAiClient(discord.Client):
             raise RuntimeError("Repository not initialized. setup_hook must complete first.")
         return self._repo_adapter
 
+    @property
+    def ai_provider(self) -> "AIProvider":
+        """Get the AI provider, raising if not initialized."""
+        if self._ai_provider is None:
+            raise RuntimeError("AI provider not initialized. setup_hook must complete first.")
+        return self._ai_provider
+
+    @property
+    def image_provider(self) -> "ImageProvider":
+        """Get the image provider, raising if not initialized."""
+        if self._image_provider is None:
+            raise RuntimeError("Image provider not initialized. setup_hook must complete first.")
+        return self._image_provider
+
     async def setup_hook(self):
         """
-        Initialize the repository and synchronize the command tree with Discord.
+        Initialize the repository, providers, and synchronize the command tree with Discord.
         """
         # Initialize repository
         self._repository = SQLiteRepository("data/app.db")
@@ -102,6 +124,11 @@ class DiscordAiClient(discord.Client):
         self._repo_adapter = RepositoryAdapter(self._repository)
         await self._repo_adapter.validate_vendors()
         logging.info("Repository initialized and vendors validated.")
+
+        # Initialize AI providers
+        self._ai_provider = AnthropicProvider(api_key=getenv("ANTHROPIC_API_KEY"))
+        self._image_provider = FalAIProvider(api_key=getenv("FAL_KEY"))
+        logging.info("AI providers initialized.")
 
         # Check if commands are already registered
         await self.tree.sync()
@@ -446,15 +473,17 @@ async def create_image(interaction: discord.Interaction, prompt: str, timeout: O
                 await processing_view.initialize(interaction)
 
                 # Get the AI response and record it in the database. For images, a placeholder is used in place of a message.
-                response = await ai.create_image(prompt)
-                image_data = await ai.image_strip_headers(response["image"]["url"], "jpeg")
+                generated_images = await client.image_provider.generate(ImageRequest(prompt=prompt))
+                generated_image = generated_images[0]
+                image_data = await ai.image_strip_headers(generated_image.url, "jpeg")
                 image_data = await ai.compress_image(image_data) # Compress the image to reduce token count
                 str_image = json.dumps([{ "filename": "image.jpeg", "image": image_data }])
                 # Dear reader, I am so sorry for this. But Anthropic's API freaks the fuck out if you specify that a bot, rather than a user, uploaded an image as context.
                 await client.repo.add_message_with_images(interaction.channel.id, 'Fal.AI', "prompt", False, "Image", str_image)
-                
+
                 # Format the image response as a Discord file object
-                output_filename, output_file = await ai.format_image_response(image_data, "jpeg", response["has_nsfw_concepts"]) # Fal.AI returns jpeg-format image files
+                has_nsfw = generated_image.has_nsfw_content or False
+                output_filename, output_file = await ai.format_image_response(image_data, "jpeg", has_nsfw) # Fal.AI returns jpeg-format image files
                 
                 # Update the deferred message with the prompt text and the image file attached
                 output_message = "Your image was created successfully. You can use it for future `/prompt` and `/modify_image` commands."
