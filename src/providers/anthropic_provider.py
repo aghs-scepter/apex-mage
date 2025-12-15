@@ -8,12 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from anthropic import APIError, AsyncAnthropic
 
 from src.core.providers import AIProvider, ChatMessage, ChatResponse
-
 
 logger = logging.getLogger(__name__)
 

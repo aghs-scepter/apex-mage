@@ -15,7 +15,7 @@ import json
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from src.ports.repositories import (
     Channel,
@@ -293,7 +293,7 @@ class SQLiteRepository:
                 an in-memory database (useful for testing).
         """
         self._db_path = str(db_path)
-        self._connection: Optional[sqlite3.Connection] = None
+        self._connection: sqlite3.Connection | None = None
 
     async def __aenter__(self) -> "SQLiteRepository":
         """Async context manager entry: connect to the database."""
@@ -302,8 +302,8 @@ class SQLiteRepository:
 
     async def __aexit__(
         self,
-        exc_type: Optional[type],
-        exc_val: Optional[BaseException],
+        exc_type: type | None,
+        exc_val: BaseException | None,
         exc_tb: Any,
     ) -> None:
         """Async context manager exit: close the database connection."""
@@ -369,11 +369,11 @@ class SQLiteRepository:
     # ChannelRepository Implementation
     # =========================================================================
 
-    async def get_channel(self, external_id: int) -> Optional[Channel]:
+    async def get_channel(self, external_id: int) -> Channel | None:
         """Retrieve a channel by its external platform ID."""
         conn = self._ensure_connected()
 
-        def query_sync() -> Optional[sqlite3.Row]:
+        def query_sync() -> sqlite3.Row | None:
             cursor = conn.execute(_SELECT_CHANNEL, (external_id,))
             return cursor.fetchone()
 
@@ -411,11 +411,11 @@ class SQLiteRepository:
     # VendorRepository Implementation
     # =========================================================================
 
-    async def get_vendor(self, name: str) -> Optional[Vendor]:
+    async def get_vendor(self, name: str) -> Vendor | None:
         """Retrieve a vendor by its name."""
         conn = self._ensure_connected()
 
-        def query_sync() -> Optional[sqlite3.Row]:
+        def query_sync() -> sqlite3.Row | None:
             cursor = conn.execute(_SELECT_VENDOR, (name,))
             return cursor.fetchone()
 
@@ -616,7 +616,7 @@ class SQLiteRepository:
         """Check if the channel's context contains any images."""
         conn = self._ensure_connected()
 
-        def query_sync() -> Optional[sqlite3.Row]:
+        def query_sync() -> sqlite3.Row | None:
             cursor = conn.execute(
                 _SELECT_HAS_IMAGES_IN_CONTEXT,
                 (channel_external_id, vendor_name, vendor_name),

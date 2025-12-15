@@ -1,7 +1,6 @@
 """Unit tests for repository protocols and dataclasses."""
 
 from datetime import datetime
-from typing import Optional
 
 from src.ports.repositories import (
     Channel,
@@ -90,7 +89,7 @@ class TestProtocolCompliance:
         """Test that a class can implement ChannelRepository protocol."""
 
         class MockChannelRepo:
-            def get_channel(self, external_id: int) -> Optional[Channel]:
+            def get_channel(self, external_id: int) -> Channel | None:
                 return Channel(id=1, external_id=external_id)
 
             def create_channel(self, external_id: int) -> Channel:
@@ -108,7 +107,7 @@ class TestProtocolCompliance:
         """Test that a class can implement VendorRepository protocol."""
 
         class MockVendorRepo:
-            def get_vendor(self, name: str) -> Optional[Vendor]:
+            def get_vendor(self, name: str) -> Vendor | None:
                 return Vendor(id=1, name=name, model_name="test-model")
 
             def create_vendor(self, name: str, model_name: str) -> Vendor:

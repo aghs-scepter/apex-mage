@@ -11,7 +11,7 @@ All methods are async and delegate to the underlying repository.
 import json
 import logging
 from os import getenv
-from typing import Any, Optional
+from typing import Any
 
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.ports.repositories import Message

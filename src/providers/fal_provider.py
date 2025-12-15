@@ -20,7 +20,6 @@ from src.core.providers import (
     ImageRequest,
 )
 
-
 logger = logging.getLogger(__name__)
 
 

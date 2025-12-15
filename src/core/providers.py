@@ -5,9 +5,9 @@ Implementations can use Anthropic, OpenAI, or any other AI service backend.
 All types are platform-agnostic (no Discord, Slack, or other client types).
 """
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Protocol
-
+from typing import Protocol
 
 # =============================================================================
 # Data Classes

@@ -7,8 +7,7 @@ All types are platform-agnostic (no Discord, Slack, or other client types).
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, Protocol
-
+from typing import Protocol
 
 # =============================================================================
 # Data Classes
@@ -59,7 +58,7 @@ class MessageImage:
     """
 
     url: str
-    base64_data: Optional[str] = None
+    base64_data: str | None = None
 
 
 @dataclass
@@ -85,8 +84,8 @@ class Message:
     vendor_id: int
     message_type: str
     content: str
-    id: Optional[int] = None
-    timestamp: Optional[datetime] = None
+    id: int | None = None
+    timestamp: datetime | None = None
     visible: bool = True
     is_image_prompt: bool = False
     images: list[MessageImage] = field(default_factory=list)
@@ -103,7 +102,7 @@ class ChannelRepository(Protocol):
     Implementations handle the storage and retrieval of conversation channels.
     """
 
-    def get_channel(self, external_id: int) -> Optional[Channel]:
+    def get_channel(self, external_id: int) -> Channel | None:
         """Retrieve a channel by its external platform ID.
 
         Args:
@@ -148,7 +147,7 @@ class VendorRepository(Protocol):
     Implementations handle the storage and retrieval of AI vendor configurations.
     """
 
-    def get_vendor(self, name: str) -> Optional[Vendor]:
+    def get_vendor(self, name: str) -> Vendor | None:
         """Retrieve a vendor by its name.
 
         Args:

@@ -1,13 +1,12 @@
 """Shared pytest fixtures for apex-mage tests."""
 
 import sqlite3
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 import pytest_asyncio
 
 from tests.mocks.providers import MockAIProvider, MockImageProvider
-
 
 # Configure pytest-asyncio to use auto mode for async tests
 pytest_plugins = ["pytest_asyncio"]
