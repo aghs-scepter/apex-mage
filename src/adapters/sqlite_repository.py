@@ -206,14 +206,16 @@ LIMIT 1
 _DEACTIVATE_OLD_MESSAGES = """
 UPDATE channel_messages
 SET visible = FALSE
-WHERE channel_message_id NOT IN (
+WHERE channel_id = (SELECT channel_id FROM channels WHERE discord_id = ?)
+AND (vendor_id = (SELECT vendor_id FROM vendors WHERE vendor_name = ?) OR ? = "All Models")
+AND channel_message_id NOT IN (
     SELECT
         channel_message_id
     FROM channel_messages
     WHERE channel_id = (SELECT channel_id FROM channels WHERE discord_id = ?)
-    AND (vendor_id = (SELECT vendor_id FROM vendors WHERE vendor_name = ?) Or ? = "All Models")
+    AND (vendor_id = (SELECT vendor_id FROM vendors WHERE vendor_name = ?) OR ? = "All Models")
     AND visible = TRUE
-    ORDER BY message_timestamp DESC
+    ORDER BY message_timestamp DESC, channel_message_id DESC
     LIMIT ?
 )
 ;
@@ -636,7 +638,15 @@ class SQLiteRepository:
         def update_sync() -> None:
             conn.execute(
                 _DEACTIVATE_OLD_MESSAGES,
-                (channel_external_id, vendor_name, vendor_name, window_size),
+                (
+                    channel_external_id,  # WHERE clause channel
+                    vendor_name,  # WHERE clause vendor
+                    vendor_name,  # WHERE clause "All Models" check
+                    channel_external_id,  # Subquery channel
+                    vendor_name,  # Subquery vendor
+                    vendor_name,  # Subquery "All Models" check
+                    window_size,  # LIMIT
+                ),
             )
             conn.commit()
 
