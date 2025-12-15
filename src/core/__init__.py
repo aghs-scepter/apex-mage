@@ -4,6 +4,7 @@ This module contains platform-agnostic business logic and protocol definitions
 for AI providers and other core functionality.
 """
 
+from src.core.conversation import ContextBuilder, ConversationContext
 from src.core.providers import (
     AIProvider,
     ChatMessage,
@@ -12,6 +13,13 @@ from src.core.providers import (
     ImageModifyRequest,
     ImageProvider,
     ImageRequest,
+)
+from src.core.rate_limit import (
+    InMemoryRateLimitStorage,
+    RateLimit,
+    RateLimitResult,
+    RateLimitStorage,
+    SlidingWindowRateLimiter,
 )
 
 __all__ = [
@@ -24,4 +32,13 @@ __all__ = [
     "ImageModifyRequest",
     "ImageProvider",
     "ImageRequest",
+    # Conversation context
+    "ContextBuilder",
+    "ConversationContext",
+    # Rate limiting
+    "InMemoryRateLimitStorage",
+    "RateLimit",
+    "RateLimitResult",
+    "RateLimitStorage",
+    "SlidingWindowRateLimiter",
 ]
