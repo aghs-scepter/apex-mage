@@ -13,6 +13,12 @@ from src.adapters import RepositoryAdapter, SQLiteRepository, WINDOW
 from src.providers.anthropic_provider import AnthropicProvider
 from src.providers.fal_provider import FalAIProvider
 from src.core.providers import ImageRequest
+from src.core.conversation import ContextBuilder
+from src.core.rate_limit import (
+    InMemoryRateLimitStorage,
+    RateLimit,
+    SlidingWindowRateLimiter,
+)
 
 if TYPE_CHECKING:
     from src.core.providers import AIProvider, ImageProvider
@@ -92,6 +98,8 @@ class DiscordAiClient(discord.Client):
         self._repo_adapter: Optional[RepositoryAdapter] = None
         self._ai_provider: Optional["AIProvider"] = None
         self._image_provider: Optional["ImageProvider"] = None
+        self._context_builder: Optional[ContextBuilder] = None
+        self._rate_limiter: Optional[SlidingWindowRateLimiter] = None
 
     @property
     def repo(self) -> RepositoryAdapter:
@@ -114,6 +122,20 @@ class DiscordAiClient(discord.Client):
             raise RuntimeError("Image provider not initialized. setup_hook must complete first.")
         return self._image_provider
 
+    @property
+    def context_builder(self) -> ContextBuilder:
+        """Get the context builder, raising if not initialized."""
+        if self._context_builder is None:
+            raise RuntimeError("Context builder not initialized. setup_hook must complete first.")
+        return self._context_builder
+
+    @property
+    def rate_limiter(self) -> SlidingWindowRateLimiter:
+        """Get the rate limiter, raising if not initialized."""
+        if self._rate_limiter is None:
+            raise RuntimeError("Rate limiter not initialized. setup_hook must complete first.")
+        return self._rate_limiter
+
     async def setup_hook(self):
         """
         Initialize the repository, providers, and synchronize the command tree with Discord.
@@ -129,6 +151,24 @@ class DiscordAiClient(discord.Client):
         self._ai_provider = AnthropicProvider(api_key=getenv("ANTHROPIC_API_KEY"))
         self._image_provider = FalAIProvider(api_key=getenv("FAL_KEY"))
         logging.info("AI providers initialized.")
+
+        # Initialize context builder for conversation windowing
+        self._context_builder = ContextBuilder(max_messages=50, max_tokens=100000)
+        logging.info("Context builder initialized.")
+
+        # Initialize rate limiter with in-memory storage
+        # Rate limits are read from environment variables with defaults
+        chat_rate_limit = int(getenv("ANTHROPIC_RATE_LIMIT", "30"))
+        image_rate_limit = int(getenv("FAL_RATE_LIMIT", "8"))
+        storage = InMemoryRateLimitStorage()
+        self._rate_limiter = SlidingWindowRateLimiter(
+            storage,
+            {
+                "chat": RateLimit(max_requests=chat_rate_limit, window_seconds=3600),
+                "image": RateLimit(max_requests=image_rate_limit, window_seconds=3600),
+            },
+        )
+        logging.info("Rate limiter initialized.")
 
         # Check if commands are already registered
         await self.tree.sync()
@@ -289,10 +329,10 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
 
     try:
         async with asyncio.timeout(timeout):
-            # Check if channel is within or outside of prompt rate limits
-            within_rate_limit = await client.repo.enforce_text_rate_limits(interaction.channel.id)
+            # Check if user is within prompt rate limits
+            rate_check = await client.rate_limiter.check(interaction.user.id, "chat")
 
-            if within_rate_limit:
+            if rate_check.allowed:
                 # Process any images attached to the prompt into a list of b64 encoded strings
                 images = []
                 if upload:
@@ -354,7 +394,10 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                 # Get the AI response and record it in the database
                 response = await ai.prompt('Anthropic', 'prompt', prompt, context)
                 await client.repo.add_message(interaction.channel.id, 'Anthropic', "assistant", False, response)
-                
+
+                # Record the successful request for rate limiting
+                await client.rate_limiter.record(interaction.user.id, "chat")
+
                 # If old messages needed to be deactivated, notify the user
                 if deactivate_old_messages:
                     note = ">Some older messages were removed from context. Use `/clear` to reset the bot!"
@@ -395,8 +438,9 @@ async def prompt(interaction: discord.Interaction, prompt: str, upload: Optional
                     )
                     await info_view.initialize(interaction)
             else:
-                # If the channel is outside of the rate limit, tell users to chill tf out
-                error_message = f"You're sending too many prompts and have been rate-limited. The bot can handle a maximum of {getenv('ANTHROPIC_RATE_LIMIT')} `/prompt` requests per hour. Please wait a few minutes before sending more prompts."
+                # If the user is rate limited, tell them to wait
+                wait_msg = f" Try again in {int(rate_check.wait_seconds)} seconds." if rate_check.wait_seconds else ""
+                error_message = f"You're sending too many prompts and have been rate-limited. The bot can handle a maximum of {getenv('ANTHROPIC_RATE_LIMIT', '30')} `/prompt` requests per hour.{wait_msg}"
                 error_notes = [
                     {"name": "Prompt", "value": prompt},
                 ]
@@ -445,10 +489,10 @@ async def create_image(interaction: discord.Interaction, prompt: str, timeout: O
 
     try:
         async with asyncio.timeout(timeout):
-            # Check if channel is within or outside of prompt rate limits
-            within_rate_limit = await client.repo.enforce_image_rate_limits(interaction.channel.id)
+            # Check if user is within image rate limits
+            rate_check = await client.rate_limiter.check(interaction.user.id, "image")
 
-            if within_rate_limit:
+            if rate_check.allowed:
                 # Process the prompt for potential overflow
                 display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
 
@@ -481,10 +525,13 @@ async def create_image(interaction: discord.Interaction, prompt: str, timeout: O
                 # Dear reader, I am so sorry for this. But Anthropic's API freaks the fuck out if you specify that a bot, rather than a user, uploaded an image as context.
                 await client.repo.add_message_with_images(interaction.channel.id, 'Fal.AI', "prompt", False, "Image", str_image)
 
+                # Record the successful request for rate limiting
+                await client.rate_limiter.record(interaction.user.id, "image")
+
                 # Format the image response as a Discord file object
                 has_nsfw = generated_image.has_nsfw_content or False
                 output_filename, output_file = await ai.format_image_response(image_data, "jpeg", has_nsfw) # Fal.AI returns jpeg-format image files
-                
+
                 # Update the deferred message with the prompt text and the image file attached
                 output_message = "Your image was created successfully. You can use it for future `/prompt` and `/modify_image` commands."
                 output_notes = [
@@ -502,12 +549,13 @@ async def create_image(interaction: discord.Interaction, prompt: str, timeout: O
                 )
                 await output_view.initialize(interaction)
             else:
-                # If the channel is outside of the rate limit, tell users to chill tf out
-                error_message = f"You're requesting too many images and have been rate-limited. The bot can handle a maximum of {getenv('FAL_RATE_LIMIT')} `/create_image` requests per hour. Please wait a few minutes before sending more requests."
+                # If the user is rate limited, tell them to wait
+                wait_msg = f" Try again in {int(rate_check.wait_seconds)} seconds." if rate_check.wait_seconds else ""
+                error_message = f"You're requesting too many images and have been rate-limited. The bot can handle a maximum of {getenv('FAL_RATE_LIMIT', '8')} `/create_image` requests per hour.{wait_msg}"
 
                 # Process the prompt for potential overflow in error view
                 display_prompt, full_prompt_url = await handle_text_overflow("prompt", prompt, interaction.channel.id)
-                
+
                 error_notes = [
                     {"name": "Prompt", "value": display_prompt},
                 ]
