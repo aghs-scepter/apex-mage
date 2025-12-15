@@ -6,6 +6,11 @@ for AI providers and other core functionality.
 
 from src.core.carousel_logic import CarouselController, CarouselState
 from src.core.conversation import ContextBuilder, ConversationContext
+from src.core.image_utils import (
+    compress_image,
+    format_image_response,
+    image_strip_headers,
+)
 from src.core.providers import (
     AIProvider,
     ChatMessage,
@@ -36,6 +41,10 @@ __all__ = [
     "ImageModifyRequest",
     "ImageProvider",
     "ImageRequest",
+    # Image utilities
+    "compress_image",
+    "format_image_response",
+    "image_strip_headers",
     # Conversation context
     "ContextBuilder",
     "ConversationContext",

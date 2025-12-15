@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import discord
 from discord import app_commands
 
-from src.adapters import RepositoryAdapter, SQLiteRepository
+from src.adapters import GCSAdapter, RepositoryAdapter, SQLiteRepository
 from src.core.conversation import ContextBuilder
 from src.core.rate_limit import (
     InMemoryRateLimitStorage,
@@ -41,6 +41,7 @@ class DiscordBot(discord.Client):
         self._image_provider: ImageProvider | None = None
         self._context_builder: ContextBuilder | None = None
         self._rate_limiter: SlidingWindowRateLimiter | None = None
+        self._gcs_adapter: GCSAdapter | None = None
 
     @property
     def repo(self) -> RepositoryAdapter:
@@ -87,6 +88,15 @@ class DiscordBot(discord.Client):
             )
         return self._rate_limiter
 
+    @property
+    def gcs_adapter(self) -> GCSAdapter:
+        """Get the GCS adapter, raising if not initialized."""
+        if self._gcs_adapter is None:
+            raise RuntimeError(
+                "GCS adapter not initialized. setup_hook must complete first."
+            )
+        return self._gcs_adapter
+
     async def setup_hook(self) -> None:
         """Initialize providers and sync commands with Discord."""
         # Initialize repository
@@ -100,6 +110,10 @@ class DiscordBot(discord.Client):
         self._ai_provider = AnthropicProvider(api_key=getenv("ANTHROPIC_API_KEY"))
         self._image_provider = FalAIProvider(api_key=getenv("FAL_KEY"))
         logging.info("AI providers initialized.")
+
+        # Initialize GCS adapter for cloud storage uploads
+        self._gcs_adapter = GCSAdapter()
+        logging.info("GCS adapter initialized.")
 
         # Initialize context builder for conversation windowing
         self._context_builder = ContextBuilder(max_messages=50, max_tokens=100000)

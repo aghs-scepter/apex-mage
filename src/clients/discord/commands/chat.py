@@ -6,17 +6,18 @@ import functools
 import json
 import logging
 from os import getenv
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
 
-import ai
 from src.adapters import WINDOW
 from src.clients.discord.views.carousel import (
     ClearHistoryConfirmationView,
     InfoEmbedView,
 )
+from src.core.image_utils import compress_image
+from src.core.providers import ChatMessage
 
 if TYPE_CHECKING:
     from src.clients.discord.bot import DiscordBot
@@ -43,11 +44,12 @@ def count_command(func):
 
 
 async def handle_text_overflow(
-    text_type: str, text: str, channel_id: int
+    bot: "DiscordBot", text_type: str, text: str, channel_id: int
 ) -> tuple[str, str | None]:
     """Handle text overflow by truncating and uploading to cloud storage if needed.
 
     Args:
+        bot: The Discord bot instance with GCS adapter.
         text_type: The type of text ("prompt" or "response")
         text: The original text
         channel_id: The channel ID
@@ -58,7 +60,7 @@ async def handle_text_overflow(
     if len(text) > 1024:
         try:
             cloud_url = await asyncio.to_thread(
-                ai.upload_response_to_cloud, text_type, channel_id, text
+                bot.gcs_adapter.upload_text, text_type, channel_id, text
             )
             modified_text = (
                 text[:950]
@@ -75,6 +77,46 @@ async def handle_text_overflow(
             )
             return modified_text, None
     return text, None
+
+
+def _convert_context_to_messages(
+    context: list[dict[str, Any]],
+) -> tuple[list[ChatMessage], str | None]:
+    """Convert database context to ChatMessage list and extract system prompt.
+
+    Args:
+        context: List of message dicts from the repository.
+
+    Returns:
+        Tuple of (chat_messages, system_prompt) where system_prompt is the most
+        recent behavior message or None.
+    """
+    messages: list[ChatMessage] = []
+    system_prompt: str | None = None
+
+    # Find the most recent behavior message (system prompt)
+    for row in reversed(context):
+        if row["message_type"] == "behavior":
+            system_prompt = row["message_data"]
+            break
+
+    # Convert non-behavior messages to ChatMessages
+    for row in context:
+        msg_type = row["message_type"]
+        if msg_type == "behavior":
+            continue  # Skip behavior messages - they become system prompt
+
+        # Map message_type to ChatMessage role
+        if msg_type == "prompt":
+            role = "user"
+        elif msg_type == "assistant":
+            role = "assistant"
+        else:
+            continue  # Skip unknown types
+
+        messages.append(ChatMessage(role=role, content=row["message_data"]))
+
+    return messages, system_prompt
 
 
 def _create_embed_user(interaction: discord.Interaction) -> dict:
@@ -164,7 +206,8 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                         if file_extension in ["png", "jpg", "jpeg"]:
                             file_data = await upload.read()
                             image_b64 = base64.b64encode(file_data).decode("utf-8")
-                            image_b64 = await ai.compress_image(image_b64)
+                            # compress_image is sync, run in thread to avoid blocking
+                            image_b64 = await asyncio.to_thread(compress_image, image_b64)
 
                             filename_without_ext = upload.filename.rsplit(".", 1)[0]
                             new_filename = f"{filename_without_ext}.jpeg"
@@ -200,7 +243,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                         )
 
                     display_prompt, full_prompt_url = await handle_text_overflow(
-                        "prompt", prompt, interaction.channel_id
+                        bot, "prompt", prompt, interaction.channel_id
                     )
 
                     processing_message = "Thinking... (This may take up to 30 seconds)"
@@ -222,10 +265,15 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                     await processing_view.initialize(interaction)
 
                     display_prompt, full_prompt_url = await handle_text_overflow(
-                        "prompt", prompt, interaction.channel_id
+                        bot, "prompt", prompt, interaction.channel_id
                     )
 
-                    response = await ai.prompt("Anthropic", "prompt", prompt, context)
+                    # Convert context to ChatMessages and extract system prompt
+                    chat_messages, system_prompt = _convert_context_to_messages(context)
+                    chat_response = await bot.ai_provider.chat(
+                        chat_messages, system_prompt=system_prompt
+                    )
+                    response = chat_response.content
                     await bot.repo.add_message(
                         interaction.channel_id, "Anthropic", "assistant", False, response
                     )
@@ -236,7 +284,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                         pass  # Could add note about pruned messages
 
                     display_response, full_response_url = await handle_text_overflow(
-                        "response", response, interaction.channel_id
+                        bot, "response", response, interaction.channel_id
                     )
 
                     info_notes = [
@@ -346,7 +394,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                 )
 
                 display_prompt, full_prompt_url = await handle_text_overflow(
-                    "prompt", prompt, interaction.channel_id
+                    bot, "prompt", prompt, interaction.channel_id
                 )
 
                 processing_message = (
@@ -364,13 +412,17 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                 )
                 await processing_view.initialize(interaction)
 
-                response = await ai.prompt("Anthropic", "behavior", prompt, context)
+                # Behavior prompts just acknowledge the new setting, no API call needed
+                response = (
+                    f"I will use the following system prompt for future interactions:"
+                    f"\n\n{prompt}"
+                )
                 await bot.repo.add_message(
                     interaction.channel_id, "Anthropic", "assistant", False, response
                 )
 
                 display_response, full_response_url = await handle_text_overflow(
-                    "response", response, interaction.channel_id
+                    bot, "response", response, interaction.channel_id
                 )
 
                 success_notes = [

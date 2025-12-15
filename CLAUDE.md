@@ -31,13 +31,17 @@ AI-powered conversational assistant with multi-channel support. Currently a Disc
 | `.github/workflows/` | CI/CD pipelines |
 | `history/` | AI-generated planning documents |
 
-### Current Structure (pre-refactor)
+### Current Structure
 
 ```
-├── main.py              # Discord bot core, slash commands
-├── ai.py                # API integrations (Anthropic, Fal.AI, GCS)
-├── mem.py               # Database operations, rate limiting
-├── carousel.py          # Discord UI components
+├── main.py              # Entry point, runs Discord bot
+├── src/
+│   ├── core/            # Business logic (rate_limit, conversation, image_utils)
+│   ├── ports/           # Protocol definitions
+│   ├── adapters/        # External integrations (SQLite, GCS)
+│   ├── providers/       # AI provider implementations (Anthropic, Fal.AI)
+│   └── clients/
+│       └── discord/     # Discord bot (bot.py, commands/, views/)
 ├── allowed_vendors.json # Model configuration
 ├── db/                  # SQL schema and queries
 └── Dockerfile           # Container definition

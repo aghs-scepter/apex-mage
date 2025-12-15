@@ -11,14 +11,17 @@ from typing import TYPE_CHECKING
 import discord
 from discord import app_commands
 
-import ai
-import mem
 from src.clients.discord.views.carousel import (
     ImageCarouselView,
     ImageEditPerformView,
     ImageEditTypeView,
     ImageSelectionTypeView,
     InfoEmbedView,
+)
+from src.core.image_utils import (
+    compress_image,
+    format_image_response,
+    image_strip_headers,
 )
 from src.core.providers import ImageRequest
 
@@ -48,11 +51,12 @@ def count_command(func):
 
 
 async def handle_text_overflow(
-    text_type: str, text: str, channel_id: int
+    bot: "DiscordBot", text_type: str, text: str, channel_id: int
 ) -> tuple[str, str | None]:
     """Handle text overflow by truncating and uploading to cloud storage if needed.
 
     Args:
+        bot: The Discord bot instance with GCS adapter.
         text_type: The type of text ("prompt" or "response")
         text: The original text
         channel_id: The channel ID
@@ -63,7 +67,7 @@ async def handle_text_overflow(
     if len(text) > 1024:
         try:
             cloud_url = await asyncio.to_thread(
-                ai.upload_response_to_cloud, text_type, channel_id, text
+                bot.gcs_adapter.upload_text, text_type, channel_id, text
             )
             modified_text = (
                 text[:950]
@@ -119,7 +123,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
         if file_extension in ["png", "jpg", "jpeg"]:
             file_data = await image.read()
             image_b64 = base64.b64encode(file_data).decode("utf-8")
-            image_b64 = await ai.compress_image(image_b64)
+            image_b64 = await asyncio.to_thread(compress_image, image_b64)
 
             filename_without_ext = image.filename.rsplit(".", 1)[0]
             new_filename = f"{filename_without_ext}.jpeg"
@@ -195,7 +199,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
 
                 if rate_check.allowed:
                     display_prompt, full_prompt_url = await handle_text_overflow(
-                        "prompt", prompt, interaction.channel_id
+                        bot, "prompt", prompt, interaction.channel_id
                     )
 
                     await bot.repo.create_channel(interaction.channel_id)
@@ -222,10 +226,8 @@ def register_image_commands(bot: "DiscordBot") -> None:
                         ImageRequest(prompt=prompt)
                     )
                     generated_image = generated_images[0]
-                    image_data = await ai.image_strip_headers(
-                        generated_image.url, "jpeg"
-                    )
-                    image_data = await ai.compress_image(image_data)
+                    image_data = image_strip_headers(generated_image.url, "jpeg")
+                    image_data = await asyncio.to_thread(compress_image, image_data)
                     str_image = json.dumps(
                         [{"filename": "image.jpeg", "image": image_data}]
                     )
@@ -241,7 +243,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
                     await bot.rate_limiter.record(interaction.user.id, "image")
 
                     has_nsfw = generated_image.has_nsfw_content or False
-                    output_filename, _ = await ai.format_image_response(
+                    output_filename, _ = format_image_response(
                         image_data, "jpeg", has_nsfw
                     )
 
@@ -275,7 +277,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
                     )
 
                     display_prompt, full_prompt_url = await handle_text_overflow(
-                        "prompt", prompt, interaction.channel_id
+                        bot, "prompt", prompt, interaction.channel_id
                     )
 
                     error_notes = [{"name": "Prompt", "value": display_prompt}]
@@ -298,7 +300,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
             )
 
             display_prompt, full_prompt_url = await handle_text_overflow(
-                "prompt", prompt, interaction.channel_id
+                bot, "prompt", prompt, interaction.channel_id
             )
 
             error_notes = [{"name": "Prompt", "value": display_prompt}]
@@ -318,7 +320,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
             error_message = "An unexpected error occurred while processing your request."
 
             display_prompt, full_prompt_url = await handle_text_overflow(
-                "prompt", prompt, interaction.channel_id
+                bot, "prompt", prompt, interaction.channel_id
             )
 
             error_notes = [{"name": "Prompt", "value": display_prompt}]
@@ -434,6 +436,8 @@ def register_image_commands(bot: "DiscordBot") -> None:
                 edit_type=edit_type,
                 prompt=prompt,
                 on_complete=on_edit_complete,
+                rate_limiter=bot.rate_limiter,
+                image_provider=bot.image_provider,
             )
             await perform_view.initialize(edit_interaction)
 
@@ -486,7 +490,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
             if selection_type == "Recent Images":
                 await sel_interaction.response.defer()
 
-                images = mem.get_images(interaction.channel_id, "All Models")
+                images = await bot.repo.get_images(interaction.channel_id, "All Models")
 
                 carousel_view = ImageCarouselView(
                     interaction=sel_interaction,
@@ -501,5 +505,6 @@ def register_image_commands(bot: "DiscordBot") -> None:
             interaction=interaction,
             user=embed_user,
             on_select=on_selection_type,
+            repo=bot.repo,
         )
         await selection_view.initialize(interaction)

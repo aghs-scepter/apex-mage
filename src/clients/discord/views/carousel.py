@@ -1,15 +1,21 @@
 """Discord UI components for carousel and embed views."""
 
+import asyncio
 import base64
 import io
 import logging
 from collections.abc import Callable, Coroutine
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import discord
 
-import ai
-import mem
+from src.core.image_utils import compress_image, image_strip_headers
+from src.core.providers import ImageRequest
+
+if TYPE_CHECKING:
+    from src.adapters.repository_compat import RepositoryAdapter
+    from src.core.providers import ImageProvider
+    from src.core.rate_limit import SlidingWindowRateLimiter
 
 EMBED_COLOR_ERROR = 0xE91515
 EMBED_COLOR_INFO = 0x3498DB
@@ -242,6 +248,7 @@ class ImageSelectionTypeView(discord.ui.View):
         on_select: (
             Callable[[discord.Interaction, str], Coroutine[Any, Any, None]] | None
         ) = None,
+        repo: "RepositoryAdapter | None" = None,
     ) -> None:
         super().__init__()
         self.user = user
@@ -249,6 +256,7 @@ class ImageSelectionTypeView(discord.ui.View):
         self.embed: discord.Embed | None = None
         self.message: discord.Message | None = None
         self.on_select = on_select
+        self.repo = repo
 
     async def initialize(self, interaction: discord.Interaction) -> None:
         """Initialize the image selection type modal."""
@@ -264,9 +272,11 @@ class ImageSelectionTypeView(discord.ui.View):
 
         # Check if the channel has recent images
         has_previous_image = False
-        has_recent_images = mem.get_channel_latest_image_indicator(
-            interaction.channel_id, "All Models"
-        )
+        has_recent_images = False
+        if self.repo:
+            has_recent_images = await self.repo.has_images_in_context(
+                interaction.channel_id, "All Models"
+            )
 
         self.update_buttons(has_previous_image, has_recent_images)
         logging.debug("ImageSelectionTypeModal embed created successfully.")
@@ -785,6 +795,8 @@ class ImageEditPerformView(discord.ui.View):
         on_complete: (
             Callable[[discord.Interaction, dict], Coroutine[Any, Any, None]] | None
         ) = None,
+        rate_limiter: "SlidingWindowRateLimiter | None" = None,
+        image_provider: "ImageProvider | None" = None,
     ) -> None:
         super().__init__()
         self.interaction = interaction
@@ -794,6 +806,8 @@ class ImageEditPerformView(discord.ui.View):
         self.image_data = image_data
         self.edit_type = edit_type
         self.on_complete = on_complete
+        self.rate_limiter = rate_limiter
+        self.image_provider = image_provider
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.embed: discord.Embed | None = None
 
@@ -823,21 +837,26 @@ class ImageEditPerformView(discord.ui.View):
         """Perform the actual image modification using the AI service."""
         try:
             # Check rate limits
-            within_rate_limit = await mem.enforce_image_rate_limits(
-                self.interaction.channel_id
-            )
-
-            if not within_rate_limit:
-                error_data = {
-                    "error": True,
-                    "message": (
-                        "Rate limit exceeded. "
-                        "Please wait before requesting more image edits."
-                    ),
-                }
-                if self.on_complete:
-                    await self.on_complete(self.interaction, error_data)
-                return
+            if self.rate_limiter:
+                rate_check = await self.rate_limiter.check(
+                    self.interaction.user.id, "image"
+                )
+                if not rate_check.allowed:
+                    wait_msg = (
+                        f" Try again in {int(rate_check.wait_seconds)} seconds."
+                        if rate_check.wait_seconds
+                        else ""
+                    )
+                    error_data = {
+                        "error": True,
+                        "message": (
+                            "Rate limit exceeded. "
+                            f"Please wait before requesting more image edits.{wait_msg}"
+                        ),
+                    }
+                    if self.on_complete:
+                        await self.on_complete(self.interaction, error_data)
+                    return
 
             guidance_scale = 0.0
             if self.edit_type == "Adjust":
@@ -846,14 +865,26 @@ class ImageEditPerformView(discord.ui.View):
                 guidance_scale = 1.5
 
             # Perform the image modification
-            response = await ai.modify_image(
-                self.image_data["image"], prompt, guidance_scale=guidance_scale
+            if not self.image_provider:
+                raise RuntimeError("Image provider not initialized")
+
+            modified_images = await self.image_provider.modify(
+                ImageRequest(
+                    prompt=prompt,
+                    image_data=self.image_data["image"],
+                    guidance_scale=guidance_scale,
+                )
             )
+            modified_image = modified_images[0]
 
             # Process the response
-            image_data = await ai.image_strip_headers(response["image"]["url"], "jpeg")
-            image_data = await ai.compress_image(image_data)
-            image_return = {"filename": "image.jpeg", "image": image_data}
+            result_image_data = image_strip_headers(modified_image.url, "jpeg")
+            result_image_data = await asyncio.to_thread(compress_image, result_image_data)
+            image_return = {"filename": "image.jpeg", "image": result_image_data}
+
+            # Record the request after successful operation
+            if self.rate_limiter:
+                await self.rate_limiter.record(self.interaction.user.id, "image")
 
             # Call completion callback
             if self.on_complete:

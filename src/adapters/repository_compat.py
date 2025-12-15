@@ -222,6 +222,68 @@ class RepositoryAdapter:
         )
         return result
 
+    async def get_images(
+        self,
+        discord_id: int,
+        vendor_name: str,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Get a flat list of image data dicts for a channel.
+
+        This method extracts individual image data from messages, suitable for
+        display in carousels or other image selection UIs.
+
+        Args:
+            discord_id: The Discord channel ID.
+            vendor_name: The vendor name to filter by (or 'All Models').
+            limit: Maximum number of messages to search (default 10).
+
+        Returns:
+            List of image dicts with 'filename' and 'image' keys.
+        """
+        logger.debug(f"Getting images for channel {discord_id}...")
+        messages = await self._repo.get_latest_images(discord_id, vendor_name, limit)
+        images: list[dict[str, Any]] = []
+        for msg in messages:
+            # Each message may contain multiple images
+            for img in msg.images:
+                # img.url contains the image dict (filename, image)
+                if isinstance(img.url, dict):
+                    images.append(img.url)
+                elif isinstance(img.url, str):
+                    # Handle legacy string format
+                    try:
+                        img_data = json.loads(img.url)
+                        if isinstance(img_data, dict):
+                            images.append(img_data)
+                    except json.JSONDecodeError:
+                        pass
+        logger.debug(f"Retrieved {len(images)} images for channel {discord_id}.")
+        return images
+
+    async def has_images_in_context(
+        self,
+        discord_id: int,
+        vendor_name: str,
+    ) -> bool:
+        """Check if the channel's context contains any images.
+
+        Args:
+            discord_id: The Discord channel ID.
+            vendor_name: The vendor name to filter by (or 'All Models').
+
+        Returns:
+            True if at least one image exists in the context, False otherwise.
+        """
+        logger.debug(
+            f"Checking for images in context for channel {discord_id}..."
+        )
+        result = await self._repo.has_images_in_context(discord_id, vendor_name)
+        logger.debug(
+            f"Images in context for channel {discord_id}: {result}"
+        )
+        return result
+
     async def deactivate_old_messages(
         self,
         discord_id: int,
