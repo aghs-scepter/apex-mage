@@ -1,0 +1,296 @@
+"""Fal.AI image generation provider implementation.
+
+This module provides an implementation of the ImageProvider protocol
+for Fal.AI's image generation API (Flux, Stable Diffusion, etc.).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import logging
+from typing import Any
+
+import fal_client
+
+from src.core.providers import (
+    GeneratedImage,
+    ImageModifyRequest,
+    ImageProvider,
+    ImageRequest,
+)
+
+
+logger = logging.getLogger(__name__)
+
+
+class FalAIError(Exception):
+    """Exception raised for Fal.AI API errors."""
+
+    pass
+
+
+class FalAIProvider:
+    """Fal.AI image generation provider implementing ImageProvider protocol.
+
+    This provider wraps the fal_client SDK to provide image generation
+    and modification functionality. It supports both text-to-image generation
+    and image-to-image modification using Flux models.
+
+    The API key is injected via the constructor to support dependency
+    injection and avoid direct environment variable access.
+
+    Attributes:
+        _api_key: The Fal.AI API key for authentication.
+        _create_model: The model to use for image generation.
+        _modify_model: The model to use for image modification.
+    """
+
+    # Default models - these are the production models from allowed_vendors.json
+    DEFAULT_CREATE_MODEL = "fal-ai/flux-pro/v1.1-ultra"
+    DEFAULT_MODIFY_MODEL = "fal-ai/flux-pro/v1/canny"
+
+    def __init__(
+        self,
+        api_key: str,
+        create_model: str | None = None,
+        modify_model: str | None = None,
+    ) -> None:
+        """Initialize the Fal.AI provider.
+
+        Args:
+            api_key: The Fal.AI API key for authentication.
+            create_model: The model to use for image generation.
+                Defaults to "fal-ai/flux-pro/v1.1-ultra".
+            modify_model: The model to use for image modification.
+                Defaults to "fal-ai/flux-pro/v1/canny".
+        """
+        self._api_key = api_key
+        self._create_model = create_model or self.DEFAULT_CREATE_MODEL
+        self._modify_model = modify_model or self.DEFAULT_MODIFY_MODEL
+
+        # Set the API key for fal_client
+        # The fal_client uses FAL_KEY environment variable by default,
+        # but we want to support dependency injection
+        import os
+        os.environ["FAL_KEY"] = api_key
+
+    async def _upload_image(self, image_data: bytes, filename: str) -> str:
+        """Upload an image to Fal.AI for use in image modification.
+
+        Args:
+            image_data: The raw image bytes.
+            filename: The filename for the uploaded image.
+
+        Returns:
+            The URL of the uploaded image.
+
+        Raises:
+            FalAIError: If the upload fails.
+        """
+        logger.debug("Uploading image to Fal.AI...")
+
+        def do_upload() -> str:
+            return fal_client.upload(
+                data=image_data,
+                content_type="image/jpeg",
+                file_name=filename,
+            )
+
+        try:
+            url = await asyncio.to_thread(do_upload)
+            logger.debug("Image uploaded successfully.")
+            return url
+        except Exception as ex:
+            logger.error("Failed to upload image to Fal.AI: %s", ex)
+            raise FalAIError(f"Failed to upload image: {ex}") from ex
+
+    def _on_queue_update(self, update: Any) -> None:
+        """Callback for queue status updates.
+
+        Args:
+            update: The queue update information from Fal.AI.
+        """
+        logger.debug("Fal.AI queue update: still waiting...")
+
+    async def generate(
+        self,
+        request: ImageRequest,
+    ) -> list[GeneratedImage]:
+        """Generate images from a text prompt.
+
+        Creates images based on the provided request parameters using
+        Fal.AI's Flux model.
+
+        Args:
+            request: An ImageRequest containing the prompt and generation
+                parameters.
+
+        Returns:
+            A list of GeneratedImage objects containing the generated images.
+
+        Raises:
+            FalAIError: If the API call fails.
+        """
+        logger.debug("Generating image for prompt: %s", request.prompt)
+
+        # Build arguments for Fal.AI API
+        arguments: dict[str, Any] = {
+            "prompt": request.prompt,
+            "enable_safety_checker": False,
+            "sync_mode": True,
+            "safety_tolerance": 5,
+        }
+
+        # Add optional parameters if provided
+        if request.negative_prompt:
+            arguments["negative_prompt"] = request.negative_prompt
+
+        if request.num_images > 1:
+            arguments["num_images"] = request.num_images
+
+        # Note: Flux Pro models have fixed dimensions, but we include these
+        # for models that support custom sizes
+        if request.width != 1024 or request.height != 1024:
+            arguments["image_size"] = {
+                "width": request.width,
+                "height": request.height,
+            }
+
+        if request.guidance_scale is not None:
+            arguments["guidance_scale"] = request.guidance_scale
+
+        def subscribe() -> dict[str, Any]:
+            return fal_client.subscribe(
+                application=self._create_model,
+                arguments=arguments,
+                with_logs=True,
+                on_queue_update=self._on_queue_update,
+            )
+
+        try:
+            result = await asyncio.to_thread(subscribe)
+            logger.debug("Image generation completed.")
+
+            # Convert response to GeneratedImage list
+            images = []
+            result_images = result.get("images", [])
+            has_nsfw_list = result.get("has_nsfw_concepts", [])
+
+            for i, img_data in enumerate(result_images):
+                has_nsfw = (
+                    has_nsfw_list[i] if i < len(has_nsfw_list) else None
+                )
+
+                # Fal.AI returns images with url and optionally width/height
+                image = GeneratedImage(
+                    url=img_data.get("url"),
+                    width=img_data.get("width", request.width),
+                    height=img_data.get("height", request.height),
+                    content_type=img_data.get("content_type", "image/jpeg"),
+                    has_nsfw_content=has_nsfw,
+                )
+                images.append(image)
+
+            return images
+
+        except Exception as ex:
+            logger.error("Fal.AI image generation failed: %s", ex)
+            raise FalAIError(f"Image generation failed: {ex}") from ex
+
+    async def modify(
+        self,
+        request: ImageModifyRequest,
+    ) -> list[GeneratedImage]:
+        """Modify an existing image based on a text prompt.
+
+        Uses Fal.AI's image-to-image capabilities to transform the input
+        image according to the prompt.
+
+        Args:
+            request: An ImageModifyRequest containing the source image,
+                modification prompt, and guidance scale.
+
+        Returns:
+            A list of GeneratedImage objects containing the modified images.
+
+        Raises:
+            FalAIError: If the API call fails.
+        """
+        logger.debug("Modifying image with prompt: %s", request.prompt)
+
+        # Decode base64 image data and upload to Fal.AI
+        try:
+            image_bytes = base64.b64decode(request.image_data)
+        except Exception as ex:
+            raise FalAIError(f"Invalid base64 image data: {ex}") from ex
+
+        image_url = await self._upload_image(image_bytes, "image.jpeg")
+
+        # Build arguments for the modify endpoint
+        arguments: dict[str, Any] = {
+            "control_image_url": image_url,
+            "prompt": request.prompt,
+            "num_inference_steps": 28,
+            "guidance_scale": request.guidance_scale,
+            "enable_safety_checker": False,
+            "sync_mode": True,
+            "safety_tolerance": 5,
+        }
+
+        def subscribe() -> dict[str, Any]:
+            return fal_client.subscribe(
+                application=self._modify_model,
+                arguments=arguments,
+                with_logs=True,
+                on_queue_update=self._on_queue_update,
+            )
+
+        try:
+            result = await asyncio.to_thread(subscribe)
+            logger.debug("Image modification completed.")
+
+            # Convert response to GeneratedImage list
+            images = []
+            result_images = result.get("images", [])
+            has_nsfw_list = result.get("has_nsfw_concepts", [])
+
+            for i, img_data in enumerate(result_images):
+                has_nsfw = (
+                    has_nsfw_list[i] if i < len(has_nsfw_list) else None
+                )
+
+                image = GeneratedImage(
+                    url=img_data.get("url"),
+                    width=img_data.get("width", 0),
+                    height=img_data.get("height", 0),
+                    content_type=img_data.get("content_type", "image/jpeg"),
+                    has_nsfw_content=has_nsfw,
+                )
+                images.append(image)
+
+            return images
+
+        except Exception as ex:
+            logger.error("Fal.AI image modification failed: %s", ex)
+            raise FalAIError(f"Image modification failed: {ex}") from ex
+
+    async def get_models(self) -> list[str]:
+        """Get the list of available image generation models.
+
+        Returns the model identifiers currently configured for this provider.
+
+        Returns:
+            A list of model identifier strings.
+        """
+        return [self._create_model, self._modify_model]
+
+
+# Protocol compliance verification
+def _verify_protocol_compliance() -> None:
+    """Verify that FalAIProvider implements ImageProvider protocol.
+
+    This function is not called at runtime but serves as a static
+    type check to ensure protocol compliance.
+    """
+    _: ImageProvider = FalAIProvider(api_key="test")  # noqa: F841
