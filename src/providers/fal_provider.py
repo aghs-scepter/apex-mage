@@ -13,6 +13,7 @@ from typing import Any
 
 import fal_client
 
+from src.core.errors import classify_error, is_retryable
 from src.core.providers import (
     GeneratedImage,
     ImageModifyRequest,
@@ -43,6 +44,8 @@ class FalAIProvider:
         _api_key: The Fal.AI API key for authentication.
         _create_model: The model to use for image generation.
         _modify_model: The model to use for image modification.
+        _max_retries: Maximum retry attempts for transient errors.
+        _base_delay: Base delay for exponential backoff (seconds).
     """
 
     # Default models - these are the production models from allowed_vendors.json
@@ -54,8 +57,29 @@ class FalAIProvider:
         api_key: str,
         create_model: str | None = None,
         modify_model: str | None = None,
+        max_retries: int = 3,
+        base_delay: float = 1.0,
     ) -> None:
         """Initialize the Fal.AI provider.
+
+        Note on API Key Handling:
+            This provider sets the FAL_KEY environment variable as a side effect.
+            This is INTENTIONAL for the following reasons:
+
+            1. **Single-bill design**: All Fal.AI API calls are consolidated
+               under a single API key for simplified billing management.
+
+            2. **fal_client limitation**: The fal_client library reads credentials
+               exclusively from the FAL_KEY environment variable and does not
+               support passing the API key directly to API calls.
+
+            3. **No concurrent key support**: Multiple FalAIProvider instances
+               with different API keys are NOT supported. The last instantiated
+               provider's key will be used for all calls.
+
+            This is a known architectural limitation. If your use case requires
+            multiple concurrent API keys, consider using separate processes or
+            a different client library.
 
         Args:
             api_key: The Fal.AI API key for authentication.
@@ -63,14 +87,20 @@ class FalAIProvider:
                 Defaults to "fal-ai/flux-pro/v1.1-ultra".
             modify_model: The model to use for image modification.
                 Defaults to "fal-ai/flux-pro/v1/canny".
+            max_retries: Maximum number of retries for transient errors.
+                Defaults to 3.
+            base_delay: Base delay in seconds for exponential backoff.
+                Defaults to 1.0.
         """
         self._api_key = api_key
         self._create_model = create_model or self.DEFAULT_CREATE_MODEL
         self._modify_model = modify_model or self.DEFAULT_MODIFY_MODEL
+        self._max_retries = max_retries
+        self._base_delay = base_delay
 
         # Set the API key for fal_client
-        # The fal_client uses FAL_KEY environment variable by default,
-        # but we want to support dependency injection
+        # See docstring above for explanation of why this env var mutation
+        # is intentional and necessary.
         import os
         os.environ["FAL_KEY"] = api_key
 
@@ -111,6 +141,77 @@ class FalAIProvider:
             update: The queue update information from Fal.AI.
         """
         logger.debug("Fal.AI queue update: still waiting...")
+
+    async def _call_with_retry(
+        self,
+        sync_func,
+        operation_name: str,
+    ) -> Any:
+        """Execute a synchronous function with retry logic for transient errors.
+
+        This method wraps synchronous fal_client calls with exponential backoff
+        retry logic for transient errors (network issues, rate limits, server
+        overload, etc.).
+
+        Args:
+            sync_func: A callable that performs the synchronous API operation.
+            operation_name: Human-readable name for logging (e.g., "image generation").
+
+        Returns:
+            The result of the sync_func call.
+
+        Raises:
+            FalAIError: If all retries are exhausted or a permanent error occurs.
+        """
+        last_error: Exception | None = None
+
+        for attempt in range(self._max_retries + 1):
+            try:
+                return await asyncio.to_thread(sync_func)
+            except Exception as ex:
+                last_error = ex
+                category = classify_error(ex)
+
+                if not is_retryable(category):
+                    logger.error(
+                        "Fal.AI %s failed with permanent error: %s",
+                        operation_name,
+                        ex,
+                    )
+                    raise FalAIError(
+                        f"{operation_name.capitalize()} failed: {ex}"
+                    ) from ex
+
+                if attempt >= self._max_retries:
+                    logger.error(
+                        "Fal.AI %s failed after %d attempts: %s",
+                        operation_name,
+                        attempt + 1,
+                        ex,
+                    )
+                    raise FalAIError(
+                        f"{operation_name.capitalize()} failed after "
+                        f"{attempt + 1} attempts: {ex}"
+                    ) from ex
+
+                # Calculate delay with exponential backoff
+                delay = self._base_delay * (2.0 ** attempt)
+                logger.warning(
+                    "Fal.AI %s failed (attempt %d/%d), retrying in %.1fs: %s",
+                    operation_name,
+                    attempt + 1,
+                    self._max_retries + 1,
+                    delay,
+                    ex,
+                )
+                await asyncio.sleep(delay)
+
+        # Should never reach here, but just in case
+        if last_error:
+            raise FalAIError(
+                f"{operation_name.capitalize()} failed: {last_error}"
+            ) from last_error
+        raise RuntimeError("Unexpected state in _call_with_retry")
 
     async def generate(
         self,
@@ -167,35 +268,31 @@ class FalAIProvider:
                 on_queue_update=self._on_queue_update,
             )
 
-        try:
-            result = await asyncio.to_thread(subscribe)
-            logger.debug("Image generation completed.")
+        # Call with retry logic for transient errors
+        result = await self._call_with_retry(subscribe, "image generation")
+        logger.debug("Image generation completed.")
 
-            # Convert response to GeneratedImage list
-            images = []
-            result_images = result.get("images", [])
-            has_nsfw_list = result.get("has_nsfw_concepts", [])
+        # Convert response to GeneratedImage list
+        images = []
+        result_images = result.get("images", [])
+        has_nsfw_list = result.get("has_nsfw_concepts", [])
 
-            for i, img_data in enumerate(result_images):
-                has_nsfw = (
-                    has_nsfw_list[i] if i < len(has_nsfw_list) else None
-                )
+        for i, img_data in enumerate(result_images):
+            has_nsfw = (
+                has_nsfw_list[i] if i < len(has_nsfw_list) else None
+            )
 
-                # Fal.AI returns images with url and optionally width/height
-                image = GeneratedImage(
-                    url=img_data.get("url"),
-                    width=img_data.get("width", request.width),
-                    height=img_data.get("height", request.height),
-                    content_type=img_data.get("content_type", "image/jpeg"),
-                    has_nsfw_content=has_nsfw,
-                )
-                images.append(image)
+            # Fal.AI returns images with url and optionally width/height
+            image = GeneratedImage(
+                url=img_data.get("url"),
+                width=img_data.get("width", request.width),
+                height=img_data.get("height", request.height),
+                content_type=img_data.get("content_type", "image/jpeg"),
+                has_nsfw_content=has_nsfw,
+            )
+            images.append(image)
 
-            return images
-
-        except Exception as ex:
-            logger.error("Fal.AI image generation failed: %s", ex)
-            raise FalAIError(f"Image generation failed: {ex}") from ex
+        return images
 
     async def modify(
         self,
@@ -245,34 +342,30 @@ class FalAIProvider:
                 on_queue_update=self._on_queue_update,
             )
 
-        try:
-            result = await asyncio.to_thread(subscribe)
-            logger.debug("Image modification completed.")
+        # Call with retry logic for transient errors
+        result = await self._call_with_retry(subscribe, "image modification")
+        logger.debug("Image modification completed.")
 
-            # Convert response to GeneratedImage list
-            images = []
-            result_images = result.get("images", [])
-            has_nsfw_list = result.get("has_nsfw_concepts", [])
+        # Convert response to GeneratedImage list
+        images = []
+        result_images = result.get("images", [])
+        has_nsfw_list = result.get("has_nsfw_concepts", [])
 
-            for i, img_data in enumerate(result_images):
-                has_nsfw = (
-                    has_nsfw_list[i] if i < len(has_nsfw_list) else None
-                )
+        for i, img_data in enumerate(result_images):
+            has_nsfw = (
+                has_nsfw_list[i] if i < len(has_nsfw_list) else None
+            )
 
-                image = GeneratedImage(
-                    url=img_data.get("url"),
-                    width=img_data.get("width", 0),
-                    height=img_data.get("height", 0),
-                    content_type=img_data.get("content_type", "image/jpeg"),
-                    has_nsfw_content=has_nsfw,
-                )
-                images.append(image)
+            image = GeneratedImage(
+                url=img_data.get("url"),
+                width=img_data.get("width", 0),
+                height=img_data.get("height", 0),
+                content_type=img_data.get("content_type", "image/jpeg"),
+                has_nsfw_content=has_nsfw,
+            )
+            images.append(image)
 
-            return images
-
-        except Exception as ex:
-            logger.error("Fal.AI image modification failed: %s", ex)
-            raise FalAIError(f"Image modification failed: {ex}") from ex
+        return images
 
     async def get_models(self) -> list[str]:
         """Get the list of available image generation models.
