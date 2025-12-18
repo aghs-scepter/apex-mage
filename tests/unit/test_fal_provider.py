@@ -453,12 +453,16 @@ class TestImageModification:
 
 
 class TestErrorHandling:
-    """Tests for error handling."""
+    """Tests for error handling.
+
+    Note: Uses max_retries=0 to disable retries and ensure fast test execution.
+    Retry behavior is tested separately in TestRetryBehavior.
+    """
 
     @pytest.fixture
     def provider(self) -> FalAIProvider:
-        """Create a FalAIProvider for testing."""
-        return FalAIProvider(api_key="test-key")
+        """Create a FalAIProvider for testing with retries disabled."""
+        return FalAIProvider(api_key="test-key", max_retries=0)
 
     @pytest.mark.asyncio
     async def test_generate_api_error_raises_fal_error(
@@ -519,6 +523,220 @@ class TestErrorHandling:
                 await provider.modify(request)
 
             assert "Image modification failed" in str(exc_info.value)
+
+
+class TestRetryBehavior:
+    """Tests for retry logic with exponential backoff.
+
+    Tests that:
+    - Transient errors (network, rate limit, 503) trigger retries
+    - Permanent errors (401, 400) fail immediately without retries
+    - Correct number of retries occur before final failure
+    """
+
+    @pytest.fixture
+    def provider(self) -> FalAIProvider:
+        """Create a FalAIProvider with retries enabled and short delay."""
+        return FalAIProvider(api_key="test-key", max_retries=3, base_delay=0.1)
+
+    @pytest.mark.asyncio
+    async def test_retries_on_network_error(
+        self, provider: FalAIProvider
+    ) -> None:
+        """Test that network errors trigger retries."""
+        with patch("asyncio.sleep") as mock_sleep, patch(
+            "src.providers.fal_provider.fal_client.subscribe"
+        ) as mock_subscribe:
+            mock_subscribe.side_effect = Exception("Network error: connection reset")
+
+            request = ImageRequest(prompt="Test")
+
+            with pytest.raises(FalAIError) as exc_info:
+                await provider.generate(request)
+
+            # Should have retried 3 times (4 total attempts)
+            assert mock_subscribe.call_count == 4
+            # Sleep should have been called 3 times (between retries)
+            assert mock_sleep.call_count == 3
+            assert "after 4 attempts" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_retries_on_rate_limit_error(
+        self, provider: FalAIProvider
+    ) -> None:
+        """Test that rate limit errors (429) trigger retries."""
+        with patch("asyncio.sleep") as mock_sleep, patch(
+            "src.providers.fal_provider.fal_client.subscribe"
+        ) as mock_subscribe:
+            mock_subscribe.side_effect = Exception("HTTP 429: rate limit exceeded")
+
+            request = ImageRequest(prompt="Test")
+
+            with pytest.raises(FalAIError):
+                await provider.generate(request)
+
+            # Should have retried 3 times (4 total attempts)
+            assert mock_subscribe.call_count == 4
+            assert mock_sleep.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_retries_on_service_unavailable(
+        self, provider: FalAIProvider
+    ) -> None:
+        """Test that 503 errors trigger retries."""
+        with patch("asyncio.sleep") as mock_sleep, patch(
+            "src.providers.fal_provider.fal_client.subscribe"
+        ) as mock_subscribe:
+            mock_subscribe.side_effect = Exception("HTTP 503: service unavailable")
+
+            request = ImageRequest(prompt="Test")
+
+            with pytest.raises(FalAIError):
+                await provider.generate(request)
+
+            # Should have retried 3 times (4 total attempts)
+            assert mock_subscribe.call_count == 4
+            assert mock_sleep.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_no_retry_on_auth_error(
+        self, provider: FalAIProvider
+    ) -> None:
+        """Test that authentication errors (401) fail immediately without retries."""
+        with patch("asyncio.sleep") as mock_sleep, patch(
+            "src.providers.fal_provider.fal_client.subscribe"
+        ) as mock_subscribe:
+            mock_subscribe.side_effect = Exception("HTTP 401: unauthorized")
+
+            request = ImageRequest(prompt="Test")
+
+            with pytest.raises(FalAIError) as exc_info:
+                await provider.generate(request)
+
+            # Should fail immediately without retries
+            assert mock_subscribe.call_count == 1
+            assert mock_sleep.call_count == 0
+            # Should NOT say "after X attempts"
+            assert "after" not in str(exc_info.value).lower() or "attempts" not in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_no_retry_on_bad_request(
+        self, provider: FalAIProvider
+    ) -> None:
+        """Test that bad request errors (400) fail immediately without retries."""
+        with patch("asyncio.sleep") as mock_sleep, patch(
+            "src.providers.fal_provider.fal_client.subscribe"
+        ) as mock_subscribe:
+            mock_subscribe.side_effect = Exception("HTTP 400: bad request")
+
+            request = ImageRequest(prompt="Test")
+
+            with pytest.raises(FalAIError):
+                await provider.generate(request)
+
+            # Should fail immediately without retries
+            assert mock_subscribe.call_count == 1
+            assert mock_sleep.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_no_retry_on_forbidden(
+        self, provider: FalAIProvider
+    ) -> None:
+        """Test that forbidden errors (403) fail immediately without retries."""
+        with patch("asyncio.sleep") as mock_sleep, patch(
+            "src.providers.fal_provider.fal_client.subscribe"
+        ) as mock_subscribe:
+            mock_subscribe.side_effect = Exception("HTTP 403: forbidden")
+
+            request = ImageRequest(prompt="Test")
+
+            with pytest.raises(FalAIError):
+                await provider.generate(request)
+
+            # Should fail immediately without retries
+            assert mock_subscribe.call_count == 1
+            assert mock_sleep.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_exponential_backoff_delays(
+        self, provider: FalAIProvider
+    ) -> None:
+        """Test that retry delays follow exponential backoff pattern."""
+        with patch("asyncio.sleep") as mock_sleep, patch(
+            "src.providers.fal_provider.fal_client.subscribe"
+        ) as mock_subscribe:
+            # Use "connection" to trigger NETWORK classification (retryable)
+            mock_subscribe.side_effect = Exception("connection error")
+
+            request = ImageRequest(prompt="Test")
+
+            with pytest.raises(FalAIError):
+                await provider.generate(request)
+
+            # Check exponential backoff: base_delay * 2^attempt
+            # With base_delay=0.1: 0.1, 0.2, 0.4
+            delays = [call.args[0] for call in mock_sleep.call_args_list]
+            assert len(delays) == 3
+            assert delays[0] == pytest.approx(0.1)  # 0.1 * 2^0
+            assert delays[1] == pytest.approx(0.2)  # 0.1 * 2^1
+            assert delays[2] == pytest.approx(0.4)  # 0.1 * 2^2
+
+    @pytest.mark.asyncio
+    async def test_success_after_transient_failures(
+        self, provider: FalAIProvider
+    ) -> None:
+        """Test that operation succeeds if it recovers before max retries."""
+        mock_response = {
+            "images": [{"url": "https://fal.ai/success.jpg", "width": 1024, "height": 1024}],
+            "has_nsfw_concepts": [False],
+        }
+
+        with patch("asyncio.sleep") as mock_sleep, patch(
+            "src.providers.fal_provider.fal_client.subscribe"
+        ) as mock_subscribe:
+            # Fail twice with network error (retryable), then succeed
+            mock_subscribe.side_effect = [
+                Exception("connection reset"),
+                Exception("connection reset"),
+                mock_response,
+            ]
+
+            request = ImageRequest(prompt="Test")
+            result = await provider.generate(request)
+
+            # Should have made 3 calls (2 failures + 1 success)
+            assert mock_subscribe.call_count == 3
+            # Should have slept twice (between failures)
+            assert mock_sleep.call_count == 2
+            # Should return successful result
+            assert len(result) == 1
+            assert result[0].url == "https://fal.ai/success.jpg"
+
+    @pytest.mark.asyncio
+    async def test_retry_on_modify_operation(
+        self, provider: FalAIProvider
+    ) -> None:
+        """Test that retry logic also works for modify operations."""
+        import base64
+        image_data = base64.b64encode(b"test").decode("utf-8")
+
+        with patch("asyncio.sleep") as mock_sleep, patch(
+            "src.providers.fal_provider.fal_client.upload"
+        ) as mock_upload, patch(
+            "src.providers.fal_provider.fal_client.subscribe"
+        ) as mock_subscribe:
+            mock_upload.return_value = "https://fal.ai/uploaded.jpg"
+            # Use "connection" to trigger NETWORK classification (retryable)
+            mock_subscribe.side_effect = Exception("connection error")
+
+            request = ImageModifyRequest(image_data=image_data, prompt="Test")
+
+            with pytest.raises(FalAIError):
+                await provider.modify(request)
+
+            # Should have retried 3 times (4 total attempts for subscribe)
+            assert mock_subscribe.call_count == 4
+            assert mock_sleep.call_count == 3
 
 
 class TestGetModels:
