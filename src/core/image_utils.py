@@ -68,7 +68,8 @@ def compress_image(
         img = img.convert("RGB")
 
     # Calculate new dimensions while maintaining aspect ratio
-    ratio = min(max_size[0] / img.size[0], max_size[1] / img.size[1])
+    # Cap ratio at 1.0 to prevent upscaling small images
+    ratio = min(max_size[0] / img.size[0], max_size[1] / img.size[1], 1.0)
     new_size = tuple(int(x * ratio) for x in img.size)
 
     # Resize and compress the image

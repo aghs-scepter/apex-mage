@@ -119,6 +119,24 @@ class TestCompressImage:
         img = Image.open(io.BytesIO(decoded))
         assert img is not None
 
+    def test_does_not_upscale_small_images(self):
+        """Small images should keep their original dimensions."""
+        # Create a small 10x10 image
+        small_img = Image.new("RGB", (10, 10), color="blue")
+        buffer = io.BytesIO()
+        small_img.save(buffer, format="PNG")
+        small_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+        # Compress with default max_size (512, 512)
+        result = compress_image(small_base64)
+
+        # Decode result and check dimensions
+        result_bytes = base64.b64decode(result)
+        result_img = Image.open(io.BytesIO(result_bytes))
+
+        # Should NOT be upscaled to 512x512
+        assert result_img.size == (10, 10), f"Expected (10, 10), got {result_img.size}"
+
 
 class TestFormatImageResponse:
     """Tests for format_image_response function."""
