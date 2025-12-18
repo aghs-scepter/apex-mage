@@ -144,6 +144,131 @@ class TestHealthRoutes:
             assert data["version"] == "test"
             assert data["checks"] == []
 
+    def test_health_endpoint_returns_503_when_unhealthy(self) -> None:
+        """Should return 503 when any service is unhealthy."""
+        app = create_app()
+
+        from contextlib import asynccontextmanager
+
+        from src.core.health import HealthChecker, ServiceCheck, ServiceStatus
+
+        async def unhealthy_check() -> ServiceCheck:
+            return ServiceCheck(
+                name="database",
+                status=ServiceStatus.UNHEALTHY,
+                message="Connection failed",
+            )
+
+        @asynccontextmanager
+        async def test_lifespan(app):
+            checker = HealthChecker(version="test")
+            checker.add_check("database", unhealthy_check)
+            app.state.health_checker = checker
+            yield
+
+        app.router.lifespan_context = test_lifespan
+
+        with TestClient(app) as client:
+            response = client.get("/health")
+            assert response.status_code == 503
+            data = response.json()
+            assert data["status"] == "unhealthy"
+            assert len(data["checks"]) == 1
+            assert data["checks"][0]["name"] == "database"
+            assert data["checks"][0]["status"] == "unhealthy"
+
+    def test_health_endpoint_returns_503_when_degraded(self) -> None:
+        """Should return 503 when service is degraded."""
+        app = create_app()
+
+        from contextlib import asynccontextmanager
+
+        from src.core.health import HealthChecker, ServiceCheck, ServiceStatus
+
+        async def degraded_check() -> ServiceCheck:
+            return ServiceCheck(
+                name="cache",
+                status=ServiceStatus.DEGRADED,
+                message="High latency",
+            )
+
+        @asynccontextmanager
+        async def test_lifespan(app):
+            checker = HealthChecker(version="test")
+            checker.add_check("cache", degraded_check)
+            app.state.health_checker = checker
+            yield
+
+        app.router.lifespan_context = test_lifespan
+
+        with TestClient(app) as client:
+            response = client.get("/health")
+            assert response.status_code == 503
+            data = response.json()
+            assert data["status"] == "degraded"
+
+    def test_ready_endpoint_returns_503_when_unhealthy(self) -> None:
+        """Should return 503 when service is unhealthy."""
+        app = create_app()
+
+        from contextlib import asynccontextmanager
+
+        from src.core.health import HealthChecker, ServiceCheck, ServiceStatus
+
+        async def unhealthy_check() -> ServiceCheck:
+            return ServiceCheck(
+                name="database",
+                status=ServiceStatus.UNHEALTHY,
+                message="Connection failed",
+            )
+
+        @asynccontextmanager
+        async def test_lifespan(app):
+            checker = HealthChecker(version="test")
+            checker.add_check("database", unhealthy_check)
+            app.state.health_checker = checker
+            yield
+
+        app.router.lifespan_context = test_lifespan
+
+        with TestClient(app) as client:
+            response = client.get("/ready")
+            assert response.status_code == 503
+            data = response.json()
+            assert data["ready"] is False
+            assert data["status"] == "unhealthy"
+
+    def test_ready_endpoint_returns_200_when_degraded(self) -> None:
+        """Should return 200 when service is degraded (still ready to serve)."""
+        app = create_app()
+
+        from contextlib import asynccontextmanager
+
+        from src.core.health import HealthChecker, ServiceCheck, ServiceStatus
+
+        async def degraded_check() -> ServiceCheck:
+            return ServiceCheck(
+                name="cache",
+                status=ServiceStatus.DEGRADED,
+                message="High latency",
+            )
+
+        @asynccontextmanager
+        async def test_lifespan(app):
+            checker = HealthChecker(version="test")
+            checker.add_check("cache", degraded_check)
+            app.state.health_checker = checker
+            yield
+
+        app.router.lifespan_context = test_lifespan
+
+        with TestClient(app) as client:
+            response = client.get("/ready")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["ready"] is True
+            assert data["status"] == "degraded"
+
 
 class TestGetAppState:
     """Tests for get_app_state function."""

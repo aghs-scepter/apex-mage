@@ -6,7 +6,7 @@ for container orchestration and monitoring systems.
 
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 
 from src.core.health import ServiceStatus
 from src.core.logging import get_logger
@@ -17,13 +17,15 @@ router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-async def health_check(request: Request) -> dict[str, Any]:
+async def health_check(request: Request, response: Response) -> dict[str, Any]:
     """Full health check with all service statuses.
 
     Returns 200 if all services are healthy, 503 otherwise.
     """
     health_checker = request.app.state.health_checker
     report = await health_checker.check_all()
+
+    response.status_code = 200 if report.status == ServiceStatus.HEALTHY else 503
 
     logger.info(
         "health_check",
@@ -35,14 +37,16 @@ async def health_check(request: Request) -> dict[str, Any]:
 
 
 @router.get("/ready")
-async def readiness_check(request: Request) -> dict[str, Any]:
+async def readiness_check(request: Request, response: Response) -> dict[str, Any]:
     """Readiness probe for Kubernetes/container orchestration.
 
-    Returns 200 if the service is ready to receive traffic.
+    Returns 200 if the service is ready to receive traffic, 503 otherwise.
     """
     health_checker = request.app.state.health_checker
     report = await health_checker.check_all()
     is_ready = report.status in (ServiceStatus.HEALTHY, ServiceStatus.DEGRADED)
+
+    response.status_code = 200 if is_ready else 503
 
     return {"ready": is_ready, "status": report.status.value}
 
