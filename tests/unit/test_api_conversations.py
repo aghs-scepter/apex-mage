@@ -1,12 +1,13 @@
 """Tests for the conversation API routes."""
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.api.auth import AuthUser, get_current_user
 from src.api.routes.conversations import router
 from src.api.schemas import ChatCompletionRequest, ConversationCreate
 from src.core.providers import ChatResponse
@@ -54,7 +55,13 @@ def mock_rate_limiter():
 
 
 @pytest.fixture
-def app(mock_repo, mock_ai_provider, mock_rate_limiter):
+def mock_user():
+    """Create a mock authenticated user."""
+    return AuthUser(user_id=12345)
+
+
+@pytest.fixture
+def app(mock_repo, mock_ai_provider, mock_rate_limiter, mock_user):
     """Create a test FastAPI app with mocked dependencies."""
     from src.api.dependencies import get_ai_provider, get_rate_limiter, get_repository
 
@@ -65,6 +72,7 @@ def app(mock_repo, mock_ai_provider, mock_rate_limiter):
     app.dependency_overrides[get_repository] = lambda: mock_repo
     app.dependency_overrides[get_ai_provider] = lambda: mock_ai_provider
     app.dependency_overrides[get_rate_limiter] = lambda: mock_rate_limiter
+    app.dependency_overrides[get_current_user] = lambda: mock_user
 
     return app
 

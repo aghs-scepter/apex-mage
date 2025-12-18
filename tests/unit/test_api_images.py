@@ -7,6 +7,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.api.auth import AuthUser, get_current_user
 from src.api.routes.images import router
 from src.core.providers import GeneratedImage
 from src.core.rate_limit import RateLimitResult
@@ -66,7 +67,13 @@ def mock_gcs_adapter():
 
 
 @pytest.fixture
-def app(mock_image_provider, mock_rate_limiter, mock_gcs_adapter):
+def mock_user():
+    """Create a mock authenticated user."""
+    return AuthUser(user_id=12345)
+
+
+@pytest.fixture
+def app(mock_image_provider, mock_rate_limiter, mock_gcs_adapter, mock_user):
     """Create a test FastAPI app with mocked dependencies."""
     from src.api.dependencies import (
         get_gcs_adapter,
@@ -81,6 +88,7 @@ def app(mock_image_provider, mock_rate_limiter, mock_gcs_adapter):
     app.dependency_overrides[get_image_provider] = lambda: mock_image_provider
     app.dependency_overrides[get_rate_limiter] = lambda: mock_rate_limiter
     app.dependency_overrides[get_gcs_adapter] = lambda: mock_gcs_adapter
+    app.dependency_overrides[get_current_user] = lambda: mock_user
 
     return app
 

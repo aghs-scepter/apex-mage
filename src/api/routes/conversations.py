@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.adapters import RepositoryAdapter
+from src.api.auth import AuthUser, get_current_user
 from src.api.dependencies import get_ai_provider, get_rate_limiter, get_repository
 from src.api.schemas import (
     ChatCompletionRequest,
@@ -71,11 +72,13 @@ def _convert_context_to_messages(
     status_code=status.HTTP_201_CREATED,
     responses={
         201: {"description": "Conversation created successfully"},
+        401: {"model": ErrorResponse, "description": "Authentication required"},
         429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
     },
 )
 async def create_conversation(
     request: ConversationCreate,
+    user: AuthUser = Depends(get_current_user),
     repo: RepositoryAdapter = Depends(get_repository),
     ai_provider: AIProvider = Depends(get_ai_provider),
     rate_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
@@ -89,10 +92,10 @@ async def create_conversation(
     # In production, you might want to use a proper ID generation strategy
     conversation_id = int(datetime.now(UTC).timestamp() * 1000)
 
-    bind_contextvars(conversation_id=conversation_id)
+    bind_contextvars(conversation_id=conversation_id, user_id=user.user_id)
 
     try:
-        logger.info("creating_conversation")
+        logger.info("creating_conversation", user_id=user.user_id)
 
         # Create the channel in the database
         await repo.create_channel(conversation_id)
@@ -113,8 +116,8 @@ async def create_conversation(
 
         # Add initial message and get response if provided
         if request.initial_message:
-            # Check rate limit (using conversation_id as user_id for API)
-            rate_check = await rate_limiter.check(conversation_id, "chat")
+            # Check rate limit using authenticated user's ID
+            rate_check = await rate_limiter.check(user.user_id, "chat")
             if not rate_check.allowed:
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -168,7 +171,7 @@ async def create_conversation(
             messages.append(assistant_msg)
 
             # Record rate limit usage
-            await rate_limiter.record(conversation_id, "chat")
+            await rate_limiter.record(user.user_id, "chat")
 
             logger.info("initial_message_processed")
 
@@ -189,18 +192,20 @@ async def create_conversation(
     response_model=ConversationResponse,
     responses={
         200: {"description": "Conversation retrieved successfully"},
+        401: {"model": ErrorResponse, "description": "Authentication required"},
         404: {"model": ErrorResponse, "description": "Conversation not found"},
     },
 )
 async def get_conversation(
     conversation_id: int,
+    user: AuthUser = Depends(get_current_user),
     repo: RepositoryAdapter = Depends(get_repository),
 ) -> ConversationResponse:
     """Retrieve a conversation by ID with all messages."""
-    bind_contextvars(conversation_id=conversation_id)
+    bind_contextvars(conversation_id=conversation_id, user_id=user.user_id)
 
     try:
-        logger.info("retrieving_conversation")
+        logger.info("retrieving_conversation", user_id=user.user_id)
 
         # Get all visible messages
         context = await repo.get_visible_messages(conversation_id, "All Models")
@@ -252,6 +257,7 @@ async def get_conversation(
     response_model=ChatCompletionResponse,
     responses={
         200: {"description": "Message sent and response received"},
+        401: {"model": ErrorResponse, "description": "Authentication required"},
         404: {"model": ErrorResponse, "description": "Conversation not found"},
         429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
     },
@@ -259,18 +265,19 @@ async def get_conversation(
 async def send_message(
     conversation_id: int,
     request: ChatCompletionRequest,
+    user: AuthUser = Depends(get_current_user),
     repo: RepositoryAdapter = Depends(get_repository),
     ai_provider: AIProvider = Depends(get_ai_provider),
     rate_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
 ) -> ChatCompletionResponse:
     """Send a message in a conversation and get an AI response."""
-    bind_contextvars(conversation_id=conversation_id)
+    bind_contextvars(conversation_id=conversation_id, user_id=user.user_id)
 
     try:
-        logger.info("sending_message")
+        logger.info("sending_message", user_id=user.user_id)
 
-        # Check rate limit
-        rate_check = await rate_limiter.check(conversation_id, "chat")
+        # Check rate limit using authenticated user's ID
+        rate_check = await rate_limiter.check(user.user_id, "chat")
         if not rate_check.allowed:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -310,7 +317,7 @@ async def send_message(
         )
 
         # Record rate limit usage
-        await rate_limiter.record(conversation_id, "chat")
+        await rate_limiter.record(user.user_id, "chat")
 
         now = datetime.now(UTC)
 
@@ -328,7 +335,7 @@ async def send_message(
             created_at=now,
         )
 
-        logger.info("message_sent")
+        logger.info("message_sent", user_id=user.user_id)
 
         return ChatCompletionResponse(
             user_message=user_message,
@@ -344,17 +351,19 @@ async def send_message(
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
         204: {"description": "Conversation cleared successfully"},
+        401: {"model": ErrorResponse, "description": "Authentication required"},
     },
 )
 async def clear_conversation(
     conversation_id: int,
+    user: AuthUser = Depends(get_current_user),
     repo: RepositoryAdapter = Depends(get_repository),
 ) -> None:
     """Clear all messages in a conversation."""
-    bind_contextvars(conversation_id=conversation_id)
+    bind_contextvars(conversation_id=conversation_id, user_id=user.user_id)
 
     try:
-        logger.info("clearing_conversation")
+        logger.info("clearing_conversation", user_id=user.user_id)
         await repo.deactivate_all_messages(conversation_id)
         logger.info("conversation_cleared")
 

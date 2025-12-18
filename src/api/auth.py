@@ -12,6 +12,7 @@ Example:
 """
 
 import os
+import warnings
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
@@ -29,7 +30,32 @@ logger = get_logger(__name__)
 security = HTTPBearer(auto_error=False)
 
 # JWT configuration
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key-change-in-production")
+_DEFAULT_SECRET_KEY = "dev-secret-key-change-in-production"
+_jwt_secret_from_env = os.getenv("JWT_SECRET_KEY")
+_app_env = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development")).lower()
+
+# Fail-fast: In production, JWT_SECRET_KEY must be set
+if _app_env == "production" and not _jwt_secret_from_env:
+    raise RuntimeError(
+        "JWT_SECRET_KEY environment variable must be set in production. "
+        "This is required for secure token signing."
+    )
+
+# In development, warn if using default key
+if not _jwt_secret_from_env and _app_env != "production":
+    warnings.warn(
+        "JWT_SECRET_KEY not set - using insecure default key. "
+        "Set JWT_SECRET_KEY environment variable for production.",
+        UserWarning,
+        stacklevel=1,
+    )
+    logger.warning(
+        "jwt_secret_key_not_set",
+        environment=_app_env,
+        message="Using insecure default JWT secret key",
+    )
+
+JWT_SECRET_KEY = _jwt_secret_from_env or _DEFAULT_SECRET_KEY
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
 

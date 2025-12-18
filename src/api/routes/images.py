@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from src.adapters import GCSAdapter
+from src.api.auth import AuthUser, get_current_user
 from src.api.dependencies import get_gcs_adapter, get_image_provider, get_rate_limiter
 from src.core.image_utils import compress_image, format_image_response, image_strip_headers
 from src.core.logging import bind_contextvars, clear_contextvars, get_logger
@@ -97,28 +98,29 @@ class ErrorResponse(BaseModel):
     response_model=ImageResponse,
     responses={
         200: {"description": "Image generated successfully"},
+        401: {"model": ErrorResponse, "description": "Authentication required"},
         429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
         500: {"model": ErrorResponse, "description": "Generation failed"},
     },
 )
 async def generate_image(
     request: ImageGenerateRequest,
+    user: AuthUser = Depends(get_current_user),
     image_provider: ImageProvider = Depends(get_image_provider),
     rate_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
     gcs_adapter: GCSAdapter = Depends(get_gcs_adapter),
-    user_id: int = 0,  # In production, get from auth
 ) -> ImageResponse:
     """Generate a new image from a text prompt.
 
     The generated image is compressed and optionally uploaded to cloud storage.
     """
-    bind_contextvars(user_id=user_id)
+    bind_contextvars(user_id=user.user_id)
 
     try:
-        logger.info("generating_image", prompt_length=len(request.prompt))
+        logger.info("generating_image", user_id=user.user_id, prompt_length=len(request.prompt))
 
         # Check rate limit
-        rate_check = await rate_limiter.check(user_id, "image")
+        rate_check = await rate_limiter.check(user.user_id, "image")
         if not rate_check.allowed:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -151,7 +153,7 @@ async def generate_image(
             cloud_url = await asyncio.to_thread(
                 gcs_adapter.upload_image,
                 "generated",
-                user_id,
+                user.user_id,
                 image_data,
                 "jpeg",
             )
@@ -159,9 +161,9 @@ async def generate_image(
             logger.warning("gcs_upload_failed", error=str(ex))
 
         # Record rate limit usage
-        await rate_limiter.record(user_id, "image")
+        await rate_limiter.record(user.user_id, "image")
 
-        logger.info("image_generated", has_nsfw=has_nsfw)
+        logger.info("image_generated", user_id=user.user_id, has_nsfw=has_nsfw)
 
         return ImageResponse(
             image_base64=image_data,
@@ -188,32 +190,34 @@ async def generate_image(
     response_model=ImageResponse,
     responses={
         200: {"description": "Image modified successfully"},
+        401: {"model": ErrorResponse, "description": "Authentication required"},
         429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
         500: {"model": ErrorResponse, "description": "Modification failed"},
     },
 )
 async def modify_image(
     request: ImageModifyRequestSchema,
+    user: AuthUser = Depends(get_current_user),
     image_provider: ImageProvider = Depends(get_image_provider),
     rate_limiter: SlidingWindowRateLimiter = Depends(get_rate_limiter),
     gcs_adapter: GCSAdapter = Depends(get_gcs_adapter),
-    user_id: int = 0,  # In production, get from auth
 ) -> ImageResponse:
     """Modify an existing image based on a prompt.
 
     Supports variations, inpainting, and outpainting operations.
     """
-    bind_contextvars(user_id=user_id)
+    bind_contextvars(user_id=user.user_id)
 
     try:
         logger.info(
             "modifying_image",
+            user_id=user.user_id,
             guidance_scale=request.guidance_scale,
             prompt_length=len(request.prompt),
         )
 
         # Check rate limit
-        rate_check = await rate_limiter.check(user_id, "image")
+        rate_check = await rate_limiter.check(user.user_id, "image")
         if not rate_check.allowed:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -246,7 +250,7 @@ async def modify_image(
             cloud_url = await asyncio.to_thread(
                 gcs_adapter.upload_image,
                 "modified",
-                user_id,
+                user.user_id,
                 image_data,
                 "jpeg",
             )
@@ -254,9 +258,9 @@ async def modify_image(
             logger.warning("gcs_upload_failed", error=str(ex))
 
         # Record rate limit usage
-        await rate_limiter.record(user_id, "image")
+        await rate_limiter.record(user.user_id, "image")
 
-        logger.info("image_modified", has_nsfw=has_nsfw)
+        logger.info("image_modified", user_id=user.user_id, has_nsfw=has_nsfw)
 
         return ImageResponse(
             image_base64=image_data,
