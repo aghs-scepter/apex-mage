@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 # High values increase cost and latency
 WINDOW = 35
 
+# Default vendor names for rate limiting
+TEXT_VENDOR_NAME = "Anthropic"
+IMAGE_VENDOR_NAME = "Fal.AI"
+
 
 class RepositoryAdapter:
     """Adapter that wraps SQLiteRepository with mem.py-compatible methods.
@@ -324,16 +328,23 @@ class RepositoryAdapter:
             f"Messages cleared for channel {discord_id} and vendor {vendor_name}."
         )
 
-    async def enforce_text_rate_limits(self, channel_id: int) -> bool:
+    async def enforce_text_rate_limits(
+        self,
+        channel_id: int,
+        vendor_name: str = TEXT_VENDOR_NAME,
+    ) -> bool:
         """Check if channel is within text rate limits.
 
         Args:
             channel_id: The Discord channel ID.
+            vendor_name: The vendor name to check rate limits for.
 
         Returns:
             True if request is allowed, False if rate limit exceeded.
         """
-        request_count = await self._repo.get_recent_text_request_count(channel_id)
+        request_count = await self._repo.get_recent_text_request_count(
+            channel_id, vendor_name
+        )
         rate_limit = int(getenv("ANTHROPIC_RATE_LIMIT", "30"))
 
         if request_count < rate_limit:
@@ -342,16 +353,23 @@ class RepositoryAdapter:
             logger.warning(f"Text request rate limit exceeded for channel {channel_id}.")
             return False
 
-    async def enforce_image_rate_limits(self, channel_id: int) -> bool:
+    async def enforce_image_rate_limits(
+        self,
+        channel_id: int,
+        vendor_name: str = IMAGE_VENDOR_NAME,
+    ) -> bool:
         """Check if channel is within image rate limits.
 
         Args:
             channel_id: The Discord channel ID.
+            vendor_name: The vendor name to check rate limits for.
 
         Returns:
             True if request is allowed, False if rate limit exceeded.
         """
-        request_count = await self._repo.get_recent_image_request_count(channel_id)
+        request_count = await self._repo.get_recent_image_request_count(
+            channel_id, vendor_name
+        )
         rate_limit = int(getenv("FAL_RATE_LIMIT", "8"))
 
         if request_count < rate_limit:

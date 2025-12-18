@@ -493,7 +493,7 @@ class TestRateLimitRepository:
         )
         await repo.save_message(response_msg)
 
-        count = await repo.get_recent_text_request_count(12345)
+        count = await repo.get_recent_text_request_count(12345, "Anthropic")
 
         assert count == 3
 
@@ -526,7 +526,7 @@ class TestRateLimitRepository:
         )
         await repo.save_message(text_msg)
 
-        count = await repo.get_recent_image_request_count(12345)
+        count = await repo.get_recent_image_request_count(12345, "Fal.AI")
 
         assert count == 2
 

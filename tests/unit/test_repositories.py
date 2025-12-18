@@ -2,7 +2,13 @@
 
 from datetime import datetime
 
+import pytest
+
 from src.ports.repositories import (
+    AsyncChannelRepository,
+    AsyncMessageRepository,
+    AsyncRateLimitRepository,
+    AsyncVendorRepository,
     Channel,
     ChannelRepository,
     Message,
@@ -203,3 +209,138 @@ class TestProtocolCompliance:
         repo: RateLimitRepository = MockRateLimitRepo()
         assert repo.get_recent_text_request_count(12345) == 5
         assert repo.get_recent_image_request_count(12345) == 2
+
+
+class TestAsyncProtocolCompliance:
+    """Tests that verify async Protocol structural typing works correctly."""
+
+    @pytest.mark.asyncio
+    async def test_async_channel_repository_protocol(self) -> None:
+        """Test that a class can implement AsyncChannelRepository protocol."""
+
+        class MockAsyncChannelRepo:
+            async def get_channel(self, external_id: int) -> Channel | None:
+                return Channel(id=1, external_id=external_id)
+
+            async def create_channel(self, external_id: int) -> Channel:
+                return Channel(id=1, external_id=external_id)
+
+            async def get_or_create_channel(self, external_id: int) -> Channel:
+                return Channel(id=1, external_id=external_id)
+
+        repo: AsyncChannelRepository = MockAsyncChannelRepo()
+        result = await repo.get_channel(12345)
+        assert result is not None
+        assert result.external_id == 12345
+
+    @pytest.mark.asyncio
+    async def test_async_vendor_repository_protocol(self) -> None:
+        """Test that a class can implement AsyncVendorRepository protocol."""
+
+        class MockAsyncVendorRepo:
+            async def get_vendor(self, name: str) -> Vendor | None:
+                return Vendor(id=1, name=name, model_name="test-model")
+
+            async def create_vendor(self, name: str, model_name: str) -> Vendor:
+                return Vendor(id=1, name=name, model_name=model_name)
+
+            async def get_or_create_vendor(self, name: str, model_name: str) -> Vendor:
+                return Vendor(id=1, name=name, model_name=model_name)
+
+        repo: AsyncVendorRepository = MockAsyncVendorRepo()
+        result = await repo.get_vendor("anthropic")
+        assert result is not None
+        assert result.name == "anthropic"
+
+    @pytest.mark.asyncio
+    async def test_async_message_repository_protocol(self) -> None:
+        """Test that a class can implement AsyncMessageRepository protocol."""
+
+        class MockAsyncMessageRepo:
+            async def save_message(self, message: Message) -> int:
+                return 1
+
+            async def save_message_with_images(
+                self,
+                message: Message,
+                image_urls: list[str],
+            ) -> int:
+                return 1
+
+            async def get_visible_messages(
+                self,
+                channel_external_id: int,
+                vendor_name: str,
+            ) -> list[Message]:
+                return []
+
+            async def get_latest_messages(
+                self,
+                channel_external_id: int,
+                vendor_name: str,
+                limit: int,
+            ) -> list[Message]:
+                return []
+
+            async def get_latest_images(
+                self,
+                channel_external_id: int,
+                vendor_name: str,
+                limit: int,
+            ) -> list[Message]:
+                return []
+
+            async def has_images_in_context(
+                self,
+                channel_external_id: int,
+                vendor_name: str,
+            ) -> bool:
+                return False
+
+            async def deactivate_old_messages(
+                self,
+                channel_external_id: int,
+                vendor_name: str,
+                window_size: int,
+            ) -> None:
+                pass
+
+            async def clear_messages(
+                self,
+                channel_external_id: int,
+                vendor_name: str,
+            ) -> None:
+                pass
+
+        repo: AsyncMessageRepository = MockAsyncMessageRepo()
+        msg = Message(
+            channel_id=1,
+            vendor_id=1,
+            message_type="user",
+            content="test",
+        )
+        result = await repo.save_message(msg)
+        assert result == 1
+
+    @pytest.mark.asyncio
+    async def test_async_rate_limit_repository_protocol(self) -> None:
+        """Test that a class can implement AsyncRateLimitRepository protocol."""
+
+        class MockAsyncRateLimitRepo:
+            async def get_recent_text_request_count(
+                self,
+                channel_external_id: int,
+                vendor_name: str,
+            ) -> int:
+                return 5
+
+            async def get_recent_image_request_count(
+                self,
+                channel_external_id: int,
+                vendor_name: str,
+            ) -> int:
+                return 2
+
+        repo: AsyncRateLimitRepository = MockAsyncRateLimitRepo()
+        assert await repo.get_recent_text_request_count(12345, "Anthropic") == 5
+        assert await repo.get_recent_image_request_count(12345, "Fal.AI") == 2

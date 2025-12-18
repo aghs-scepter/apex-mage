@@ -238,7 +238,7 @@ JOIN channel_messages
 JOIN vendors
     ON channel_messages.vendor_id = vendors.vendor_id
 WHERE channels.discord_id = ?
-AND (vendors.vendor_name = "Anthropic")
+AND vendors.vendor_name = ?
 AND channel_messages.message_type = "prompt"
 AND channel_messages.message_timestamp BETWEEN datetime('now', '-1 hour') AND datetime('now')
 ;
@@ -253,7 +253,7 @@ JOIN channel_messages
 JOIN vendors
     ON channel_messages.vendor_id = vendors.vendor_id
 WHERE channels.discord_id = ?
-AND (vendors.vendor_name = "Fal.AI")
+AND vendors.vendor_name = ?
 AND channel_messages.message_type = "prompt"
 AND channel_messages.is_image_prompt = 1
 AND channel_messages.message_timestamp BETWEEN datetime('now', '-1 hour') AND datetime('now')
@@ -680,28 +680,36 @@ class SQLiteRepository:
     # RateLimitRepository Implementation
     # =========================================================================
 
-    async def get_recent_text_request_count(self, channel_external_id: int) -> int:
-        """Get the count of recent text requests for a channel."""
+    async def get_recent_text_request_count(
+        self,
+        channel_external_id: int,
+        vendor_name: str,
+    ) -> int:
+        """Get the count of recent text requests for a channel and vendor."""
         conn = self._ensure_connected()
 
         def query_sync() -> int:
             cursor = conn.execute(
                 _COUNT_RECENT_TEXT_REQUESTS,
-                (channel_external_id,),
+                (channel_external_id, vendor_name),
             )
             row = cursor.fetchone()
             return row["count"] if row else 0
 
         return await asyncio.to_thread(query_sync)
 
-    async def get_recent_image_request_count(self, channel_external_id: int) -> int:
-        """Get the count of recent image requests for a channel."""
+    async def get_recent_image_request_count(
+        self,
+        channel_external_id: int,
+        vendor_name: str,
+    ) -> int:
+        """Get the count of recent image requests for a channel and vendor."""
         conn = self._ensure_connected()
 
         def query_sync() -> int:
             cursor = conn.execute(
                 _COUNT_RECENT_IMAGE_REQUESTS,
-                (channel_external_id,),
+                (channel_external_id, vendor_name),
             )
             row = cursor.fetchone()
             return row["count"] if row else 0
