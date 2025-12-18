@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
-from src.core.health import ServiceCheck, ServiceStatus
+from src.core.health import ServiceStatus
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)

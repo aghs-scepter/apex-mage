@@ -5,7 +5,6 @@ These routes provide endpoints for authentication and token management.
 
 import os
 import secrets
-from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field

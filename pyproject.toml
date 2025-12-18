@@ -59,7 +59,10 @@ select = [
     "C4",   # flake8-comprehensions
     "UP",   # pyupgrade
 ]
-ignore = ["E501"]  # line too long (handled by formatter)
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # function call in default argument (FastAPI Depends() pattern)
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
@@ -71,5 +74,14 @@ warn_return_any = true
 warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
-module = ["discord.*", "fal_client.*"]
+module = [
+    "discord.*",
+    "fal_client.*",
+    "structlog.*",
+    "jwt.*",
+    "fastapi.*",
+    "google.*",
+    "uvicorn.*",
+    "aiohttp.*",
+]
 ignore_missing_imports = true

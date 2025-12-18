@@ -17,7 +17,7 @@ Example:
         return {"response": response.content}
 """
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from src.adapters import GCSAdapter, RepositoryAdapter, SQLiteRepository
 from src.core.logging import get_logger

@@ -421,7 +421,8 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                     interaction.channel_id, "Anthropic", "behavior", False, prompt
                 )
 
-                context = await bot.repo.get_visible_messages(
+                # Refresh context after adding message (result not used, but triggers DB update)
+                await bot.repo.get_visible_messages(
                     interaction.channel_id, "All Models"
                 )
 

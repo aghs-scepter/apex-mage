@@ -3,7 +3,7 @@
 These routes provide endpoints for managing conversations and messages.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -87,7 +87,7 @@ async def create_conversation(
     """
     # Generate a unique conversation ID (using timestamp-based ID for simplicity)
     # In production, you might want to use a proper ID generation strategy
-    conversation_id = int(datetime.now(timezone.utc).timestamp() * 1000)
+    conversation_id = int(datetime.now(UTC).timestamp() * 1000)
 
     bind_contextvars(conversation_id=conversation_id)
 
@@ -137,7 +137,7 @@ async def create_conversation(
                 id=msg_id,
                 role="user",
                 content=request.initial_message,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             messages.append(user_msg)
             msg_id += 1
@@ -163,7 +163,7 @@ async def create_conversation(
                 id=msg_id,
                 role="assistant",
                 content=chat_response.content,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             messages.append(assistant_msg)
 
@@ -177,7 +177,7 @@ async def create_conversation(
         return ConversationResponse(
             id=conversation_id,
             messages=messages,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
 
     finally:
@@ -312,7 +312,7 @@ async def send_message(
         # Record rate limit usage
         await rate_limiter.record(conversation_id, "chat")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         user_message = MessageResponse(
             id=len(context),

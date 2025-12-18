@@ -4,11 +4,9 @@ These routes provide endpoints for generating and modifying images.
 """
 
 import asyncio
-import base64
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from src.adapters import GCSAdapter
@@ -170,7 +168,7 @@ async def generate_image(
             filename=filename,
             has_nsfw_content=has_nsfw,
             cloud_url=cloud_url,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
 
     except HTTPException:
@@ -180,7 +178,7 @@ async def generate_image(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "Image generation failed", "detail": str(ex)},
-        )
+        ) from ex
     finally:
         clear_contextvars()
 
@@ -265,7 +263,7 @@ async def modify_image(
             filename=filename,
             has_nsfw_content=has_nsfw,
             cloud_url=cloud_url,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
 
     except HTTPException:
@@ -275,6 +273,6 @@ async def modify_image(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "Image modification failed", "detail": str(ex)},
-        )
+        ) from ex
     finally:
         clear_contextvars()

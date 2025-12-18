@@ -146,7 +146,6 @@ def classify_error(error: Exception) -> ErrorCategory:
         The ErrorCategory that best matches the error.
     """
     error_str = str(error).lower()
-    error_type = type(error).__name__
 
     # Check for timeout errors
     if isinstance(error, (TimeoutError, asyncio.TimeoutError)):
@@ -253,7 +252,7 @@ async def retry_with_backoff(
                     category=category.name,
                     error=str(ex),
                 )
-                raise PermanentError.from_exception(ex, category)
+                raise PermanentError.from_exception(ex, category) from ex
 
             if attempt >= max_retries:
                 logger.error(
@@ -262,7 +261,7 @@ async def retry_with_backoff(
                     attempts=attempt + 1,
                     error=str(ex),
                 )
-                raise TransientError.from_exception(ex, category)
+                raise TransientError.from_exception(ex, category) from ex
 
             # Calculate delay with exponential backoff
             delay = min(base_delay * (exponential_base**attempt), max_delay)

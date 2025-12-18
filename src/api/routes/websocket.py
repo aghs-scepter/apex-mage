@@ -5,13 +5,11 @@ real-time updates from conversations.
 """
 
 import json
-from typing import Any
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from src.api.auth import AuthError, decode_access_token
 from src.api.websocket import (
-    ConnectionManager,
     MessageTypes,
     WebSocketMessage,
     create_error_event,

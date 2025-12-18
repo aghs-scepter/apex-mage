@@ -7,10 +7,8 @@ import discord
 from discord import app_commands
 
 from src.adapters import GCSAdapter, RepositoryAdapter, SQLiteRepository
-from src.core.logging import get_logger
-
-logger = get_logger(__name__)
 from src.core.conversation import ContextBuilder
+from src.core.logging import get_logger
 from src.core.rate_limit import (
     InMemoryRateLimitStorage,
     RateLimit,
@@ -21,6 +19,8 @@ from src.providers.fal_provider import FalAIProvider
 
 if TYPE_CHECKING:
     from src.core.providers import AIProvider, ImageProvider
+
+logger = get_logger(__name__)
 
 
 class DiscordBot(discord.Client):

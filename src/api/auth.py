@@ -13,7 +13,7 @@ Example:
 
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 import jwt
@@ -93,7 +93,7 @@ def create_access_token(
     Returns:
         Encoded JWT token string.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if expires_delta is None:
         expires_delta = timedelta(hours=JWT_EXPIRATION_HOURS)
 
@@ -131,15 +131,15 @@ def decode_access_token(token: str) -> TokenData:
         payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
         return TokenData(
             sub=payload["sub"],
-            exp=datetime.fromtimestamp(payload["exp"], tz=timezone.utc),
-            iat=datetime.fromtimestamp(payload["iat"], tz=timezone.utc),
+            exp=datetime.fromtimestamp(payload["exp"], tz=UTC),
+            iat=datetime.fromtimestamp(payload["iat"], tz=UTC),
             api_key_id=payload.get("api_key_id"),
             scopes=payload.get("scopes", []),
         )
-    except jwt.ExpiredSignatureError:
-        raise AuthError("Token has expired", "TOKEN_EXPIRED")
+    except jwt.ExpiredSignatureError as e:
+        raise AuthError("Token has expired", "TOKEN_EXPIRED") from e
     except jwt.InvalidTokenError as e:
-        raise AuthError(f"Invalid token: {e}", "INVALID_TOKEN")
+        raise AuthError(f"Invalid token: {e}", "INVALID_TOKEN") from e
 
 
 async def get_current_user(
@@ -178,7 +178,7 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"error": e.message, "code": e.code},
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from e
 
 
 async def get_optional_user(

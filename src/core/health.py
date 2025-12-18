@@ -16,10 +16,11 @@ Example:
 """
 
 import asyncio
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable, Coroutine
+from typing import Any
 
 from aiohttp import web
 
@@ -144,7 +145,7 @@ class HealthChecker:
             if result.latency_ms is None:
                 result.latency_ms = round(elapsed, 2)
             return result
-        except asyncio.TimeoutError:
+        except TimeoutError:
             elapsed = (asyncio.get_event_loop().time() - start) * 1000
             return ServiceCheck(
                 name=name,
@@ -167,7 +168,7 @@ class HealthChecker:
         Returns:
             HealthReport with aggregated results.
         """
-        timestamp = datetime.now(timezone.utc).isoformat()
+        timestamp = datetime.now(UTC).isoformat()
 
         if not self._checks:
             return HealthReport(
@@ -182,7 +183,7 @@ class HealthChecker:
         results = await asyncio.gather(*check_tasks, return_exceptions=True)
 
         checks: list[ServiceCheck] = []
-        for name, result in zip(self._checks.keys(), results):
+        for name, result in zip(self._checks.keys(), results, strict=True):
             if isinstance(result, Exception):
                 checks.append(
                     ServiceCheck(
