@@ -244,7 +244,7 @@ class FalAIProvider:
             "prompt": request.prompt,
             "aspect_ratio": "1:1",
             "resolution": "1K",
-            "output_format": "png",
+            "output_format": "jpeg",
             "sync_mode": True,
             "enable_web_search": True,
         }
@@ -293,7 +293,7 @@ class FalAIProvider:
                 url=img_data.get("url"),
                 width=img_data.get("width", request.width),
                 height=img_data.get("height", request.height),
-                content_type=img_data.get("content_type", "image/png"),
+                content_type=img_data.get("content_type", "image/jpeg"),
                 has_nsfw_content=has_nsfw,
             )
             images.append(image)

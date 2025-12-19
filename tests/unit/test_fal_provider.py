@@ -200,7 +200,7 @@ class TestImageGeneration:
             assert "image_size" not in call_kwargs["arguments"]
             assert call_kwargs["arguments"]["aspect_ratio"] == "1:1"
             assert call_kwargs["arguments"]["resolution"] == "1K"
-            assert call_kwargs["arguments"]["output_format"] == "png"
+            assert call_kwargs["arguments"]["output_format"] == "jpeg"
 
     @pytest.mark.asyncio
     async def test_generate_default_dimensions_not_passed(
