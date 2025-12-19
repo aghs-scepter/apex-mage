@@ -27,7 +27,7 @@ Example:
 import asyncio
 from collections.abc import Awaitable, Callable
 from enum import Enum, auto
-from typing import TypeVar, cast
+from typing import TypeVar
 
 from src.core.logging import get_logger
 

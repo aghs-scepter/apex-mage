@@ -4,6 +4,7 @@ import asyncio
 import os
 
 from src.clients.discord import (
+    DiscordBot,
     create_bot,
     register_chat_commands,
     register_image_commands,
@@ -25,7 +26,7 @@ logger = get_logger(__name__)
 APP_VERSION = os.getenv("APP_VERSION", "1.0.0")
 
 
-def create_health_checker(bot) -> HealthChecker:
+def create_health_checker(bot: DiscordBot) -> HealthChecker:
     """Create health checker with service checks for the bot.
 
     Args:
