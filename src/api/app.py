@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.dependencies import get_app_state
+from src.api.dependencies import AppState, get_app_state
 from src.api.routes import (
     auth_router,
     conversations_router,
@@ -37,7 +37,7 @@ logger = get_logger(__name__)
 APP_VERSION = os.getenv("APP_VERSION", "1.0.0")
 
 
-def _create_health_checker(app_state) -> HealthChecker:
+def _create_health_checker(app_state: AppState) -> HealthChecker:
     """Create health checker with service checks for the API.
 
     Args:

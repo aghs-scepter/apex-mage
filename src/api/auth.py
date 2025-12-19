@@ -15,6 +15,7 @@ import os
 import warnings
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 import jwt
@@ -236,7 +237,7 @@ async def get_optional_user(
         return None
 
 
-def require_scope(required_scope: str):
+def require_scope(required_scope: str) -> Callable[[AuthUser], Awaitable[AuthUser]]:
     """Create a dependency that requires a specific scope.
 
     Args:

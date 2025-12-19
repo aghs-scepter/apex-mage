@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+from collections.abc import Callable
 from typing import Any
 
 import fal_client
@@ -144,7 +145,7 @@ class FalAIProvider:
 
     async def _call_with_retry(
         self,
-        sync_func,
+        sync_func: Callable[[], Any],
         operation_name: str,
     ) -> Any:
         """Execute a synchronous function with retry logic for transient errors.

@@ -1,8 +1,8 @@
 """Discord command handler decorators."""
 
 import functools
-from collections.abc import Callable
-from typing import ParamSpec, TypeVar
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
 from uuid import uuid4
 
 import discord
@@ -14,11 +14,13 @@ structured_logger = get_logger(__name__)
 # Global command counter shared across all commands (resets on restart)
 _command_count = 0
 
-P = ParamSpec("P")
 T = TypeVar("T")
 
+# Type alias for async command handlers
+CommandHandler = Callable[..., Awaitable[T]]
 
-def count_command(func: Callable[P, T]) -> Callable[P, T]:
+
+def count_command(func: CommandHandler[T]) -> CommandHandler[T]:
     """Decorator that increments and logs the global command counter.
 
     Also generates a correlation ID for request tracing and binds it
@@ -26,7 +28,9 @@ def count_command(func: Callable[P, T]) -> Callable[P, T]:
     """
 
     @functools.wraps(func)
-    async def wrapper(interaction: discord.Interaction, *args, **kwargs):
+    async def wrapper(
+        interaction: discord.Interaction, *args: Any, **kwargs: Any
+    ) -> T:
         global _command_count
         _command_count += 1
 
@@ -52,4 +56,4 @@ def count_command(func: Callable[P, T]) -> Callable[P, T]:
         finally:
             clear_contextvars()
 
-    return wrapper
+    return wrapper  # type: ignore[return-value]
