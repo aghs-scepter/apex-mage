@@ -12,11 +12,11 @@ from discord import app_commands
 from src.clients.discord.decorators import count_command
 from src.clients.discord.utils import create_embed_user, handle_text_overflow
 from src.clients.discord.views.carousel import (
-    ImageCarouselView,
     ImageEditPerformView,
     ImageEditTypeView,
     ImageSelectionTypeView,
     InfoEmbedView,
+    MultiImageCarouselView,
 )
 from src.core.image_utils import (
     compress_image,
@@ -365,8 +365,14 @@ def register_image_commands(bot: "DiscordBot") -> None:
 
             await edit_interaction.response.defer()
 
+            # Use first selected image for the processing preview
+            preview_image = selected_images[0] if selected_images else None
+            num_images = len(selected_images) if selected_images else 0
+            image_count_text = f" ({num_images} image{'s' if num_images != 1 else ''})"
+
             processing_message = (
-                "Modifying your image... (This may take up to 180 seconds)"
+                f"Modifying your image{image_count_text}... "
+                "(This may take up to 180 seconds)"
             )
             processing_view = InfoEmbedView(
                 message=interaction.message,
@@ -374,17 +380,18 @@ def register_image_commands(bot: "DiscordBot") -> None:
                 title="Image modification in progress",
                 description=processing_message,
                 is_error=False,
-                image_data=selected_image,
+                image_data=preview_image,
             )
             await processing_view.initialize(edit_interaction)
 
-            if edit_interaction.message is None or selected_image is None:
-                raise RuntimeError("Message or selected_image is None")
+            if edit_interaction.message is None or not selected_images:
+                raise RuntimeError("Message or selected_images is None/empty")
             perform_view = ImageEditPerformView(
                 interaction=edit_interaction,
                 message=edit_interaction.message,
                 user=embed_user,
-                image_data=selected_image,
+                image_data=selected_images[0],  # First image for display
+                image_data_list=selected_images,  # All selected images
                 edit_type=edit_type,
                 prompt=prompt,
                 on_complete=on_edit_complete,
@@ -393,23 +400,25 @@ def register_image_commands(bot: "DiscordBot") -> None:
             )
             await perform_view.initialize(edit_interaction)
 
-        selected_image: dict[str, str] | None = None
+        selected_images: list[dict[str, str]] = []
 
         async def on_image_selected(
-            img_interaction: discord.Interaction, image_data: dict[str, str] | None
+            img_interaction: discord.Interaction,
+            image_data_list: list[dict[str, str]],
         ) -> None:
-            """Handle image selection from carousel."""
-            nonlocal selected_image
+            """Handle image selection from multi-image carousel."""
+            nonlocal selected_images
 
-            if image_data is None:
+            if not image_data_list:
+                # Empty list = cancelled
                 # Embed already updated by the view's cancel handler
-                # Nothing more to do
                 return
 
-            selected_image = image_data
+            selected_images = image_data_list
 
+            # Use first selected image for the edit type preview
             edit_type_view = ImageEditTypeView(
-                image_data=selected_image,
+                image_data=selected_images[0],
                 user=embed_user,
                 message=img_interaction.message,
                 on_select=on_edit_type_selected,
@@ -432,7 +441,8 @@ def register_image_commands(bot: "DiscordBot") -> None:
 
                 images = await bot.repo.get_images(channel_id, "All Models")
 
-                carousel_view = ImageCarouselView(
+                # Use MultiImageCarouselView for multi-image selection
+                carousel_view = MultiImageCarouselView(
                     interaction=sel_interaction,
                     files=images,
                     user=embed_user,

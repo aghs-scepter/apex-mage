@@ -770,7 +770,11 @@ class ImageEditPromptModal(discord.ui.Modal, title="Image Edit Instructions"):
 
 
 class ImageEditPerformView(discord.ui.View):
-    """A view that handles performing an image edit operation."""
+    """A view that handles performing an image edit operation.
+
+    Supports both single-image and multi-image modification. When image_data_list
+    is provided, all images are sent to the API; otherwise only image_data is used.
+    """
 
     def __init__(
         self,
@@ -785,6 +789,7 @@ class ImageEditPerformView(discord.ui.View):
         ) = None,
         rate_limiter: "SlidingWindowRateLimiter | None" = None,
         image_provider: "ImageProvider | None" = None,
+        image_data_list: list[dict[str, str]] | None = None,
     ) -> None:
         super().__init__()
         self.interaction = interaction
@@ -792,6 +797,7 @@ class ImageEditPerformView(discord.ui.View):
         self.message = message
         self.user = user
         self.image_data = image_data
+        self.image_data_list = image_data_list or [image_data]
         self.edit_type = edit_type
         self.on_complete = on_complete
         self.rate_limiter = rate_limiter
@@ -851,10 +857,14 @@ class ImageEditPerformView(discord.ui.View):
             if not self.image_provider:
                 raise RuntimeError("Image provider not initialized")
 
+            # Extract base64 image data from all selected images
+            image_data_strings = [img["image"] for img in self.image_data_list]
+
             modified_images = await self.image_provider.modify(
                 ImageModifyRequest(
                     prompt=prompt,
-                    image_data=self.image_data["image"],
+                    image_data=image_data_strings[0],  # For backward compatibility
+                    image_data_list=image_data_strings,  # All images for multi-image
                     guidance_scale=0.0,  # Not used by nano-banana-pro/edit
                 )
             )
