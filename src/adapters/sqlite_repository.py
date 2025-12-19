@@ -288,7 +288,7 @@ VALUES (?, ?, ?, ?, ?);
 _SELECT_API_KEY_BY_HASH = """
 SELECT id, key_hash, user_id, name, scopes, created_at, last_used_at, expires_at, is_active
 FROM api_keys
-WHERE key_hash = ? AND is_active = 1 AND (expires_at IS NULL OR expires_at > datetime('now'));
+WHERE key_hash = ? AND is_active = 1 AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'));
 """
 
 _UPDATE_API_KEY_LAST_USED = """
