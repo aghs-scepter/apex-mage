@@ -37,8 +37,8 @@ class TestFalAIProviderInit:
     def test_init_default_models(self) -> None:
         """Test that default models are set correctly."""
         provider = FalAIProvider(api_key="test-key")
-        assert provider._create_model == "fal-ai/flux-pro/v1.1-ultra"
-        assert provider._modify_model == "fal-ai/flux-pro/v1/canny"
+        assert provider._create_model == "fal-ai/nano-banana-pro"
+        assert provider._modify_model == "fal-ai/nano-banana-pro/edit"
 
     def test_init_custom_models(self) -> None:
         """Test initialization with custom models."""
@@ -111,10 +111,10 @@ class TestImageGeneration:
             assert call_kwargs["arguments"]["prompt"] == "A cat sitting on a couch"
 
     @pytest.mark.asyncio
-    async def test_generate_passes_negative_prompt(
+    async def test_generate_ignores_negative_prompt(
         self, provider: FalAIProvider, mock_fal_response: dict
     ) -> None:
-        """Test that negative prompt is passed when provided."""
+        """Test that negative prompt is ignored (not supported by nano-banana-pro)."""
         with patch(
             "src.providers.fal_provider.fal_client.subscribe"
         ) as mock_subscribe:
@@ -127,7 +127,8 @@ class TestImageGeneration:
             await provider.generate(request)
 
             call_kwargs = mock_subscribe.call_args.kwargs
-            assert call_kwargs["arguments"]["negative_prompt"] == "blurry, low quality"
+            # nano-banana-pro does not support negative_prompt
+            assert "negative_prompt" not in call_kwargs["arguments"]
 
     @pytest.mark.asyncio
     async def test_generate_passes_num_images(
@@ -155,10 +156,10 @@ class TestImageGeneration:
             assert len(result) == 2
 
     @pytest.mark.asyncio
-    async def test_generate_custom_dimensions(
+    async def test_generate_uses_aspect_ratio(
         self, provider: FalAIProvider, mock_fal_response: dict
     ) -> None:
-        """Test that custom dimensions are passed."""
+        """Test that nano-banana-pro uses aspect_ratio instead of image_size."""
         with patch(
             "src.providers.fal_provider.fal_client.subscribe"
         ) as mock_subscribe:
@@ -168,10 +169,11 @@ class TestImageGeneration:
             await provider.generate(request)
 
             call_kwargs = mock_subscribe.call_args.kwargs
-            assert call_kwargs["arguments"]["image_size"] == {
-                "width": 512,
-                "height": 768,
-            }
+            # nano-banana-pro uses aspect_ratio instead of image_size
+            assert "image_size" not in call_kwargs["arguments"]
+            assert call_kwargs["arguments"]["aspect_ratio"] == "1:1"
+            assert call_kwargs["arguments"]["resolution"] == "1K"
+            assert call_kwargs["arguments"]["output_format"] == "png"
 
     @pytest.mark.asyncio
     async def test_generate_default_dimensions_not_passed(
@@ -190,10 +192,10 @@ class TestImageGeneration:
             assert "image_size" not in call_kwargs["arguments"]
 
     @pytest.mark.asyncio
-    async def test_generate_passes_guidance_scale(
+    async def test_generate_ignores_guidance_scale(
         self, provider: FalAIProvider, mock_fal_response: dict
     ) -> None:
-        """Test that guidance scale is passed when provided."""
+        """Test that guidance_scale is ignored (not supported by nano-banana-pro)."""
         with patch(
             "src.providers.fal_provider.fal_client.subscribe"
         ) as mock_subscribe:
@@ -203,7 +205,8 @@ class TestImageGeneration:
             await provider.generate(request)
 
             call_kwargs = mock_subscribe.call_args.kwargs
-            assert call_kwargs["arguments"]["guidance_scale"] == 7.5
+            # nano-banana-pro does not support guidance_scale
+            assert "guidance_scale" not in call_kwargs["arguments"]
 
     @pytest.mark.asyncio
     async def test_generate_uses_create_model(
@@ -219,7 +222,7 @@ class TestImageGeneration:
             await provider.generate(request)
 
             call_kwargs = mock_subscribe.call_args.kwargs
-            assert call_kwargs["application"] == "fal-ai/flux-pro/v1.1-ultra"
+            assert call_kwargs["application"] == "fal-ai/nano-banana-pro"
 
     @pytest.mark.asyncio
     async def test_generate_handles_missing_nsfw_concepts(
@@ -340,10 +343,10 @@ class TestImageModification:
             assert call_kwargs["file_name"] == "image.jpeg"
 
     @pytest.mark.asyncio
-    async def test_modify_passes_control_image_url(
+    async def test_modify_passes_image_urls(
         self, provider: FalAIProvider, sample_image_data: str
     ) -> None:
-        """Test that modify passes the uploaded image URL."""
+        """Test that modify passes the uploaded image URL in image_urls array."""
         mock_response = {"images": [{"url": "https://fal.ai/modified.jpg"}]}
 
         with patch(
@@ -361,7 +364,8 @@ class TestImageModification:
             await provider.modify(request)
 
             call_kwargs = mock_subscribe.call_args.kwargs
-            assert call_kwargs["arguments"]["control_image_url"] == "https://fal.ai/uploaded.jpg"
+            # nano-banana-pro/edit uses image_urls array
+            assert call_kwargs["arguments"]["image_urls"] == ["https://fal.ai/uploaded.jpg"]
 
     @pytest.mark.asyncio
     async def test_modify_passes_prompt(
@@ -388,10 +392,10 @@ class TestImageModification:
             assert call_kwargs["arguments"]["prompt"] == "Add a rainbow"
 
     @pytest.mark.asyncio
-    async def test_modify_passes_guidance_scale(
+    async def test_modify_ignores_guidance_scale(
         self, provider: FalAIProvider, sample_image_data: str
     ) -> None:
-        """Test that modify passes the guidance scale."""
+        """Test that modify ignores guidance_scale (not supported by nano-banana-pro/edit)."""
         mock_response = {"images": [{"url": "https://fal.ai/modified.jpg"}]}
 
         with patch(
@@ -410,7 +414,8 @@ class TestImageModification:
             await provider.modify(request)
 
             call_kwargs = mock_subscribe.call_args.kwargs
-            assert call_kwargs["arguments"]["guidance_scale"] == 10.0
+            # nano-banana-pro/edit does not support guidance_scale
+            assert "guidance_scale" not in call_kwargs["arguments"]
 
     @pytest.mark.asyncio
     async def test_modify_uses_modify_model(
@@ -434,7 +439,7 @@ class TestImageModification:
             await provider.modify(request)
 
             call_kwargs = mock_subscribe.call_args.kwargs
-            assert call_kwargs["application"] == "fal-ai/flux-pro/v1/canny"
+            assert call_kwargs["application"] == "fal-ai/nano-banana-pro/edit"
 
     @pytest.mark.asyncio
     async def test_modify_invalid_base64_raises_error(
@@ -749,8 +754,8 @@ class TestGetModels:
         models = await provider.get_models()
 
         assert models == [
-            "fal-ai/flux-pro/v1.1-ultra",
-            "fal-ai/flux-pro/v1/canny",
+            "fal-ai/nano-banana-pro",
+            "fal-ai/nano-banana-pro/edit",
         ]
 
     @pytest.mark.asyncio

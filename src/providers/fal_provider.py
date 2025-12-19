@@ -50,8 +50,8 @@ class FalAIProvider:
     """
 
     # Default models - these are the production models from allowed_vendors.json
-    DEFAULT_CREATE_MODEL = "fal-ai/flux-pro/v1.1-ultra"
-    DEFAULT_MODIFY_MODEL = "fal-ai/flux-pro/v1/canny"
+    DEFAULT_CREATE_MODEL = "fal-ai/nano-banana-pro"
+    DEFAULT_MODIFY_MODEL = "fal-ai/nano-banana-pro/edit"
 
     def __init__(
         self,
@@ -85,9 +85,9 @@ class FalAIProvider:
         Args:
             api_key: The Fal.AI API key for authentication.
             create_model: The model to use for image generation.
-                Defaults to "fal-ai/flux-pro/v1.1-ultra".
+                Defaults to "fal-ai/nano-banana-pro".
             modify_model: The model to use for image modification.
-                Defaults to "fal-ai/flux-pro/v1/canny".
+                Defaults to "fal-ai/nano-banana-pro/edit".
             max_retries: Maximum number of retries for transient errors.
                 Defaults to 3.
             base_delay: Base delay in seconds for exponential backoff.
@@ -221,7 +221,7 @@ class FalAIProvider:
         """Generate images from a text prompt.
 
         Creates images based on the provided request parameters using
-        Fal.AI's Flux model.
+        Fal.AI's nano-banana-pro model.
 
         Args:
             request: An ImageRequest containing the prompt and generation
@@ -235,31 +235,18 @@ class FalAIProvider:
         """
         logger.debug("Generating image for prompt: %s", request.prompt)
 
-        # Build arguments for Fal.AI API
+        # Build arguments for Fal.AI nano-banana-pro API
         arguments: dict[str, Any] = {
             "prompt": request.prompt,
-            "enable_safety_checker": False,
+            "aspect_ratio": "1:1",
+            "resolution": "1K",
+            "output_format": "png",
             "sync_mode": True,
-            "safety_tolerance": 5,
         }
 
         # Add optional parameters if provided
-        if request.negative_prompt:
-            arguments["negative_prompt"] = request.negative_prompt
-
         if request.num_images > 1:
             arguments["num_images"] = request.num_images
-
-        # Note: Flux Pro models have fixed dimensions, but we include these
-        # for models that support custom sizes
-        if request.width != 1024 or request.height != 1024:
-            arguments["image_size"] = {
-                "width": request.width,
-                "height": request.height,
-            }
-
-        if request.guidance_scale is not None:
-            arguments["guidance_scale"] = request.guidance_scale
 
         def subscribe() -> dict[str, Any]:
             return fal_client.subscribe(
@@ -288,7 +275,7 @@ class FalAIProvider:
                 url=img_data.get("url"),
                 width=img_data.get("width", request.width),
                 height=img_data.get("height", request.height),
-                content_type=img_data.get("content_type", "image/jpeg"),
+                content_type=img_data.get("content_type", "image/png"),
                 has_nsfw_content=has_nsfw,
             )
             images.append(image)
@@ -301,12 +288,13 @@ class FalAIProvider:
     ) -> list[GeneratedImage]:
         """Modify an existing image based on a text prompt.
 
-        Uses Fal.AI's image-to-image capabilities to transform the input
+        Uses Fal.AI's nano-banana-pro/edit model to transform the input
         image according to the prompt.
 
         Args:
-            request: An ImageModifyRequest containing the source image,
-                modification prompt, and guidance scale.
+            request: An ImageModifyRequest containing the source image
+                and modification prompt. Note: guidance_scale is ignored
+                as the nano-banana-pro/edit API does not support it.
 
         Returns:
             A list of GeneratedImage objects containing the modified images.
@@ -324,15 +312,16 @@ class FalAIProvider:
 
         image_url = await self._upload_image(image_bytes, "image.jpeg")
 
-        # Build arguments for the modify endpoint
+        # Build arguments for the nano-banana-pro/edit endpoint
+        # Note: guidance_scale and num_inference_steps are NOT supported
+        # by this API, so we don't include them
         arguments: dict[str, Any] = {
-            "control_image_url": image_url,
+            "image_urls": [image_url],
             "prompt": request.prompt,
-            "num_inference_steps": 28,
-            "guidance_scale": request.guidance_scale,
-            "enable_safety_checker": False,
+            "aspect_ratio": "auto",
+            "resolution": "1K",
+            "output_format": "jpeg",
             "sync_mode": True,
-            "safety_tolerance": 5,
         }
 
         def subscribe() -> dict[str, Any]:

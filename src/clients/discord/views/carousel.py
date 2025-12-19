@@ -627,8 +627,8 @@ class ImageEditTypeView(discord.ui.View):
         self.clear_items()
         logger.debug("buttons_hidden", view="ImageEditTypeView")
 
-    @discord.ui.button(label="Adjust", style=discord.ButtonStyle.primary, row=0)
-    async def adjust_button(
+    @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary, row=0)
+    async def edit_button(
         self, interaction: discord.Interaction, button: discord.ui.Button["ImageEditTypeView"]
     ) -> None:
         if self.on_select:
@@ -646,64 +646,7 @@ class ImageEditTypeView(discord.ui.View):
 
             prompt_modal = ImageEditPromptModal(
                 image_data=self.image_data,
-                edit_type="Adjust",
-                user=self.user,
-                message=self.message,
-                on_select=self.on_select,
-            )
-            await interaction.response.send_modal(prompt_modal)
-
-    @discord.ui.button(label="Redraw", style=discord.ButtonStyle.primary, row=0)
-    async def redraw_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button["ImageEditTypeView"]
-    ) -> None:
-        if self.on_select:
-            if self.user_id != interaction.user.id:
-                await interaction.response.send_message(
-                    f"Only the original requester ({self.username}) can select this option.",
-                    ephemeral=True,
-                )
-                return
-
-            self.disable_buttons()
-            self.hide_buttons()
-            if self.message:
-                await self.message.edit(view=self)
-
-            prompt_modal = ImageEditPromptModal(
-                image_data=self.image_data,
-                edit_type="Redraw",
-                user=self.user,
-                message=self.message,
-                on_select=self.on_select,
-            )
-            await interaction.response.send_modal(prompt_modal)
-
-    @discord.ui.button(
-        label="Random (disabled)",
-        style=discord.ButtonStyle.secondary,
-        disabled=True,
-        row=0,
-    )
-    async def random_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button["ImageEditTypeView"]
-    ) -> None:
-        if self.on_select:
-            if self.user_id != interaction.user.id:
-                await interaction.response.send_message(
-                    f"Only the original requester ({self.username}) can select this option.",
-                    ephemeral=True,
-                )
-                return
-
-            self.disable_buttons()
-            self.hide_buttons()
-            if self.message:
-                await self.message.edit(view=self)
-
-            prompt_modal = ImageEditPromptModal(
-                image_data=self.image_data,
-                edit_type="Random",
+                edit_type="Edit",
                 user=self.user,
                 message=self.message,
                 on_select=self.on_select,
@@ -861,13 +804,8 @@ class ImageEditPerformView(discord.ui.View):
                         await self.on_complete(self.interaction, error_data)
                     return
 
-            guidance_scale = 0.0
-            if self.edit_type == "Adjust":
-                guidance_scale = 10.0
-            elif self.edit_type == "Redraw":
-                guidance_scale = 1.5
-
             # Perform the image modification
+            # Note: guidance_scale is no longer used by nano-banana-pro/edit API
             if not self.image_provider:
                 raise RuntimeError("Image provider not initialized")
 
@@ -875,7 +813,7 @@ class ImageEditPerformView(discord.ui.View):
                 ImageModifyRequest(
                     prompt=prompt,
                     image_data=self.image_data["image"],
-                    guidance_scale=guidance_scale,
+                    guidance_scale=0.0,  # Not used by nano-banana-pro/edit
                 )
             )
             modified_image = modified_images[0]
