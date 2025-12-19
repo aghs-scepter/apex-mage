@@ -9,7 +9,7 @@ import hmac
 import os
 import secrets
 import warnings
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
@@ -56,7 +56,7 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 
 # In-memory fallback storage (for testing and when no database is configured)
 # Format: {"key_hash": {"user_id": int, "scopes": list, "name": str | None}}
-_API_KEYS_MEMORY: dict[str, dict] = {}
+_API_KEYS_MEMORY: dict[str, dict[str, Any]] = {}
 
 # Database repository (set by configure_api_key_repository)
 _api_key_repository: ApiKeyRepositoryProtocol | None = None
@@ -201,7 +201,7 @@ class ApiKeyResponse(BaseModel):
 # =============================================================================
 
 
-async def _lookup_api_key(api_key: str) -> dict | None:
+async def _lookup_api_key(api_key: str) -> dict[str, Any] | None:
     """Look up an API key and return its data if valid.
 
     Checks both database (if configured) and in-memory storage.
@@ -436,7 +436,7 @@ async def register_api_key_async(
     )
 
 
-async def validate_api_key(api_key: str) -> dict | None:
+async def validate_api_key(api_key: str) -> dict[str, Any] | None:
     """Validate an API key and return its data.
 
     This is a public async function for use outside of HTTP routes.

@@ -130,16 +130,22 @@ async def generate_image(
                 },
             )
 
-        # Generate image
-        image_request = ImageRequest(
-            prompt=request.prompt,
-            width=request.width,
-            height=request.height,
-        )
+        # Generate image - only pass width/height if explicitly provided
+        image_kwargs: dict[str, str | int] = {"prompt": request.prompt}
+        if request.width is not None:
+            image_kwargs["width"] = request.width
+        if request.height is not None:
+            image_kwargs["height"] = request.height
+        image_request = ImageRequest(**image_kwargs)  # type: ignore[arg-type]
         generated_images = await image_provider.generate(image_request)
         generated_image = generated_images[0]
 
-        # Process image
+        # Process image - url should always be present for generated images
+        if generated_image.url is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={"error": "Image generation failed", "detail": "No image URL returned"},
+            )
         image_data = image_strip_headers(generated_image.url, "jpeg")
         image_data = await asyncio.to_thread(compress_image, image_data)
 
@@ -236,7 +242,12 @@ async def modify_image(
         modified_images = await image_provider.modify(modify_request)
         modified_image = modified_images[0]
 
-        # Process image
+        # Process image - url should always be present for modified images
+        if modified_image.url is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={"error": "Image modification failed", "detail": "No image URL returned"},
+            )
         image_data = image_strip_headers(modified_image.url, "jpeg")
         image_data = await asyncio.to_thread(compress_image, image_data)
 
