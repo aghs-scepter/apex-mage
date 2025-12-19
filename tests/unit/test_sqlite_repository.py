@@ -12,6 +12,7 @@ import pytest_asyncio
 
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.ports.repositories import (
+    ApiKey,
     Channel,
     Message,
     Vendor,
@@ -768,3 +769,153 @@ class TestEdgeCases:
         # OpenAI should still have all 3 messages
         messages_openai = await repo.get_visible_messages(12345, "OpenAI")
         assert len(messages_openai) == 3
+
+
+# =============================================================================
+# ApiKeyRepository Tests
+# =============================================================================
+
+
+class TestApiKeyRepository:
+    """Tests for API key persistence operations."""
+
+    async def test_create_api_key(self, repo: SQLiteRepository) -> None:
+        """Test creating an API key."""
+        api_key = ApiKey(
+            key_hash="abc123hash",
+            user_id=42,
+            scopes=["chat", "images"],
+            name="Test Key",
+        )
+
+        created = await repo.create_api_key(api_key)
+
+        assert created.id is not None
+        assert created.id > 0
+        assert created.key_hash == "abc123hash"
+        assert created.user_id == 42
+        assert created.scopes == ["chat", "images"]
+        assert created.name == "Test Key"
+        assert created.is_active is True
+
+    async def test_get_api_key_by_hash_exists(self, repo: SQLiteRepository) -> None:
+        """Test retrieving an API key by hash."""
+        api_key = ApiKey(
+            key_hash="findmehash123",
+            user_id=99,
+            scopes=["admin"],
+        )
+        await repo.create_api_key(api_key)
+
+        found = await repo.get_api_key_by_hash("findmehash123")
+
+        assert found is not None
+        assert found.key_hash == "findmehash123"
+        assert found.user_id == 99
+        assert found.scopes == ["admin"]
+
+    async def test_get_api_key_by_hash_not_exists(
+        self, repo: SQLiteRepository
+    ) -> None:
+        """Test that get_api_key_by_hash returns None for missing key."""
+        result = await repo.get_api_key_by_hash("nonexistent")
+        assert result is None
+
+    async def test_get_api_key_by_hash_inactive_returns_none(
+        self, repo: SQLiteRepository
+    ) -> None:
+        """Test that get_api_key_by_hash returns None for revoked keys."""
+        api_key = ApiKey(
+            key_hash="revokedkey123",
+            user_id=50,
+            scopes=["chat"],
+        )
+        await repo.create_api_key(api_key)
+        await repo.revoke_api_key("revokedkey123")
+
+        result = await repo.get_api_key_by_hash("revokedkey123")
+        assert result is None
+
+    async def test_update_last_used(self, repo: SQLiteRepository) -> None:
+        """Test updating last_used_at timestamp."""
+        api_key = ApiKey(
+            key_hash="lastusedhash",
+            user_id=1,
+            scopes=[],
+        )
+        await repo.create_api_key(api_key)
+
+        # Initially last_used_at should be None
+        initial = await repo.get_api_key_by_hash("lastusedhash")
+        assert initial is not None
+        assert initial.last_used_at is None
+
+        # Update last_used
+        await repo.update_api_key_last_used("lastusedhash")
+
+        # Now last_used_at should be set
+        updated = await repo.get_api_key_by_hash("lastusedhash")
+        assert updated is not None
+        assert updated.last_used_at is not None
+
+    async def test_revoke_api_key(self, repo: SQLiteRepository) -> None:
+        """Test revoking an API key."""
+        api_key = ApiKey(
+            key_hash="toberevokedhash",
+            user_id=100,
+            scopes=["chat"],
+        )
+        await repo.create_api_key(api_key)
+
+        result = await repo.revoke_api_key("toberevokedhash")
+
+        assert result is True
+        # Key should no longer be findable
+        found = await repo.get_api_key_by_hash("toberevokedhash")
+        assert found is None
+
+    async def test_revoke_nonexistent_key_returns_false(
+        self, repo: SQLiteRepository
+    ) -> None:
+        """Test that revoking a non-existent key returns False."""
+        result = await repo.revoke_api_key("doesnotexist")
+        assert result is False
+
+    async def test_create_api_key_with_no_scopes(
+        self, repo: SQLiteRepository
+    ) -> None:
+        """Test creating an API key with empty scopes."""
+        api_key = ApiKey(
+            key_hash="noscopeshash",
+            user_id=5,
+            scopes=[],
+        )
+
+        await repo.create_api_key(api_key)
+
+        found = await repo.get_api_key_by_hash("noscopeshash")
+        assert found is not None
+        assert found.scopes == []
+
+    async def test_create_api_key_unique_hash_constraint(
+        self, repo: SQLiteRepository
+    ) -> None:
+        """Test that duplicate key hashes raise an error."""
+        api_key1 = ApiKey(
+            key_hash="duplicatehash",
+            user_id=1,
+            scopes=[],
+        )
+        await repo.create_api_key(api_key1)
+
+        api_key2 = ApiKey(
+            key_hash="duplicatehash",  # Same hash
+            user_id=2,
+            scopes=[],
+        )
+
+        # Should raise an integrity error
+        import sqlite3
+
+        with pytest.raises(sqlite3.IntegrityError):
+            await repo.create_api_key(api_key2)

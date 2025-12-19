@@ -1,10 +1,15 @@
 """Authentication routes for the HTTP API.
 
 These routes provide endpoints for authentication and token management.
+Supports both in-memory (fallback) and database-backed API key storage.
 """
 
+import hashlib
+import hmac
 import os
 import secrets
+import warnings
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
@@ -15,14 +20,98 @@ from src.api.auth import (
     create_access_token,
 )
 from src.core.logging import get_logger
+from src.ports.repositories import ApiKey
+
+if TYPE_CHECKING:
+    from src.adapters.sqlite_repository import SQLiteRepository
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
-# Simple API key storage (in production, use a database)
-# Format: {"api_key": {"user_id": int, "scopes": list}}
-_API_KEYS: dict[str, dict] = {}
+
+# =============================================================================
+# API Key Storage
+# =============================================================================
+
+# In-memory fallback storage (for testing and when no database is configured)
+# Format: {"key_hash": {"user_id": int, "scopes": list, "name": str | None}}
+_API_KEYS_MEMORY: dict[str, dict] = {}
+
+# Database repository (set by configure_api_key_repository)
+_api_key_repository: "SQLiteRepository | None" = None
+
+# Flag to track if we've warned about in-memory mode
+_warned_about_memory_mode = False
+
+
+def _hash_api_key(api_key: str) -> str:
+    """Hash an API key using SHA-256.
+
+    Args:
+        api_key: The plaintext API key.
+
+    Returns:
+        The hex-encoded SHA-256 hash.
+    """
+    return hashlib.sha256(api_key.encode()).hexdigest()
+
+
+def _constant_time_compare(a: str, b: str) -> bool:
+    """Compare two strings in constant time to prevent timing attacks.
+
+    Args:
+        a: First string.
+        b: Second string.
+
+    Returns:
+        True if the strings are equal, False otherwise.
+    """
+    return hmac.compare_digest(a.encode(), b.encode())
+
+
+def configure_api_key_repository(repository: "SQLiteRepository | None") -> None:
+    """Configure the API key repository for database-backed storage.
+
+    Call this during application startup to enable persistent API key storage.
+    If not called or called with None, API keys will be stored in-memory only.
+
+    Args:
+        repository: The SQLite repository to use, or None for in-memory only.
+    """
+    global _api_key_repository
+    _api_key_repository = repository
+    if repository is not None:
+        logger.info("api_key_repository_configured", storage="database")
+    else:
+        logger.info("api_key_repository_configured", storage="memory")
+
+
+def _get_storage_mode() -> str:
+    """Get the current storage mode for API keys.
+
+    Returns:
+        'database' if using database storage, 'memory' otherwise.
+    """
+    return "database" if _api_key_repository is not None else "memory"
+
+
+def _warn_memory_mode() -> None:
+    """Log a warning if using in-memory mode (only once)."""
+    global _warned_about_memory_mode
+    if not _warned_about_memory_mode and _api_key_repository is None:
+        warnings.warn(
+            "API keys are stored in-memory only. Keys will be lost on restart. "
+            "Configure a database repository for persistent storage.",
+            UserWarning,
+            stacklevel=3,
+        )
+        logger.warning(
+            "api_keys_memory_mode",
+            message="API keys stored in-memory only - will be lost on restart",
+        )
+        _warned_about_memory_mode = True
+
 
 # Load API keys from environment variable if provided
 # Format: "key1:user_id1:scope1,scope2;key2:user_id2:scope1"
@@ -34,7 +123,17 @@ if _api_keys_env:
             key = parts[0]
             user_id = int(parts[1])
             scopes = parts[2].split(",") if len(parts) > 2 else []
-            _API_KEYS[key] = {"user_id": user_id, "scopes": scopes}
+            key_hash = _hash_api_key(key)
+            _API_KEYS_MEMORY[key_hash] = {
+                "user_id": user_id,
+                "scopes": scopes,
+                "name": None,
+            }
+
+
+# =============================================================================
+# Request/Response Schemas
+# =============================================================================
 
 
 class ApiKeyAuth(BaseModel):
@@ -57,6 +156,10 @@ class ApiKeyCreate(BaseModel):
         default_factory=list,
         description="Permission scopes for this key",
     )
+    name: str | None = Field(
+        default=None,
+        description="Optional friendly name for the key",
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -71,6 +174,102 @@ class ApiKeyResponse(BaseModel):
     api_key: str
     user_id: int
     scopes: list[str]
+
+
+# =============================================================================
+# API Key Lookup/Storage Functions
+# =============================================================================
+
+
+async def _lookup_api_key(api_key: str) -> dict | None:
+    """Look up an API key and return its data if valid.
+
+    Checks both database (if configured) and in-memory storage.
+
+    Args:
+        api_key: The plaintext API key.
+
+    Returns:
+        Dict with user_id and scopes if found, None otherwise.
+    """
+    key_hash = _hash_api_key(api_key)
+
+    # Try database first if configured
+    if _api_key_repository is not None:
+        db_key = await _api_key_repository.get_api_key_by_hash(key_hash)
+        if db_key is not None:
+            # Update last_used timestamp (fire and forget)
+            try:
+                await _api_key_repository.update_api_key_last_used(key_hash)
+            except Exception as e:
+                logger.warning("failed_to_update_last_used", error=str(e))
+
+            return {
+                "user_id": db_key.user_id,
+                "scopes": db_key.scopes,
+                "name": db_key.name,
+            }
+
+    # Fall back to in-memory storage
+    for stored_hash, data in _API_KEYS_MEMORY.items():
+        if _constant_time_compare(key_hash, stored_hash):
+            return data
+
+    return None
+
+
+async def _store_api_key(
+    api_key: str,
+    user_id: int,
+    scopes: list[str],
+    name: str | None = None,
+) -> None:
+    """Store an API key.
+
+    Stores in database if configured, otherwise in-memory with a warning.
+
+    Args:
+        api_key: The plaintext API key (will be hashed before storage).
+        user_id: The user ID for this key.
+        scopes: Permission scopes for this key.
+        name: Optional friendly name.
+    """
+    key_hash = _hash_api_key(api_key)
+
+    # Store in database if configured
+    if _api_key_repository is not None:
+        db_key = ApiKey(
+            key_hash=key_hash,
+            user_id=user_id,
+            scopes=scopes,
+            name=name,
+        )
+        await _api_key_repository.create_api_key(db_key)
+        logger.info(
+            "api_key_created",
+            user_id=user_id,
+            scopes=scopes,
+            storage="database",
+        )
+    else:
+        # Fall back to in-memory storage with warning
+        _warn_memory_mode()
+        _API_KEYS_MEMORY[key_hash] = {
+            "user_id": user_id,
+            "scopes": scopes,
+            "name": name,
+        }
+        logger.info(
+            "api_key_created",
+            user_id=user_id,
+            scopes=scopes,
+            storage="memory",
+        )
+
+
+# =============================================================================
+# Routes
+# =============================================================================
 
 
 @router.post(
@@ -88,7 +287,7 @@ async def get_token(request: ApiKeyAuth) -> TokenResponse:
     for subsequent requests.
     """
     # Look up API key
-    key_data = _API_KEYS.get(request.api_key)
+    key_data = await _lookup_api_key(request.api_key)
     if key_data is None:
         logger.warning("invalid_api_key_attempt")
         raise HTTPException(
@@ -102,7 +301,7 @@ async def get_token(request: ApiKeyAuth) -> TokenResponse:
 
     token = create_access_token(
         user_id=user_id,
-        api_key_id=request.api_key[:8],  # Store truncated key ID
+        api_key_id=_hash_api_key(request.api_key)[:8],  # Store truncated hash
         scopes=scopes,
     )
 
@@ -145,13 +344,13 @@ async def create_api_key(request: ApiKeyCreate) -> ApiKeyResponse:
     # Generate a secure API key
     api_key = secrets.token_urlsafe(32)
 
-    # Store the key
-    _API_KEYS[api_key] = {
-        "user_id": request.user_id,
-        "scopes": request.scopes,
-    }
-
-    logger.info("api_key_created", user_id=request.user_id, scopes=request.scopes)
+    # Store the key (never log the actual key)
+    await _store_api_key(
+        api_key=api_key,
+        user_id=request.user_id,
+        scopes=request.scopes,
+        name=request.name,
+    )
 
     return ApiKeyResponse(
         api_key=api_key,
@@ -160,17 +359,83 @@ async def create_api_key(request: ApiKeyCreate) -> ApiKeyResponse:
     )
 
 
-def register_api_key(api_key: str, user_id: int, scopes: list[str] | None = None):
-    """Register an API key programmatically.
+# =============================================================================
+# Programmatic API Key Management
+# =============================================================================
+
+
+def register_api_key(
+    api_key: str,
+    user_id: int,
+    scopes: list[str] | None = None,
+    name: str | None = None,
+) -> None:
+    """Register an API key programmatically (synchronous, in-memory only).
 
     This is useful for testing or initialization scripts.
+    For production use, call the async version or use the API endpoint.
+
+    Note: This always uses in-memory storage for backwards compatibility
+    with existing tests. For database storage, use register_api_key_async.
 
     Args:
         api_key: The API key string.
         user_id: The user ID for this key.
         scopes: Optional list of permission scopes.
+        name: Optional friendly name for the key.
     """
-    _API_KEYS[api_key] = {
+    key_hash = _hash_api_key(api_key)
+    _API_KEYS_MEMORY[key_hash] = {
         "user_id": user_id,
         "scopes": scopes or [],
+        "name": name,
     }
+
+
+async def register_api_key_async(
+    api_key: str,
+    user_id: int,
+    scopes: list[str] | None = None,
+    name: str | None = None,
+) -> None:
+    """Register an API key programmatically (async, uses configured storage).
+
+    This function will use database storage if configured, otherwise in-memory.
+
+    Args:
+        api_key: The API key string.
+        user_id: The user ID for this key.
+        scopes: Optional list of permission scopes.
+        name: Optional friendly name for the key.
+    """
+    await _store_api_key(
+        api_key=api_key,
+        user_id=user_id,
+        scopes=scopes or [],
+        name=name,
+    )
+
+
+async def validate_api_key(api_key: str) -> dict | None:
+    """Validate an API key and return its data.
+
+    This is a public async function for use outside of HTTP routes.
+
+    Args:
+        api_key: The plaintext API key to validate.
+
+    Returns:
+        Dict with user_id and scopes if valid, None otherwise.
+    """
+    return await _lookup_api_key(api_key)
+
+
+def clear_memory_keys() -> None:
+    """Clear all in-memory API keys.
+
+    This is primarily useful for testing to reset state between tests.
+    Does not affect keys stored in the database.
+    """
+    global _warned_about_memory_mode
+    _API_KEYS_MEMORY.clear()
+    _warned_about_memory_mode = False

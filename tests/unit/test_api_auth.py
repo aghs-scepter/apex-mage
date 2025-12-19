@@ -1,8 +1,7 @@
 """Tests for the authentication module."""
 
-from datetime import timedelta, timezone
-from datetime import datetime
-from unittest.mock import AsyncMock, patch
+from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -17,7 +16,15 @@ from src.api.auth import (
     get_optional_user,
     require_scope,
 )
-from src.api.routes.auth import router, register_api_key
+from src.api.routes.auth import (
+    _constant_time_compare,
+    _hash_api_key,
+    clear_memory_keys,
+    configure_api_key_repository,
+    register_api_key,
+    router,
+    validate_api_key,
+)
 
 
 class TestCreateAccessToken:
@@ -58,7 +65,7 @@ class TestCreateAccessToken:
         )
         decoded = decode_access_token(token)
         # Should expire within ~5 minutes
-        time_diff = decoded.exp - datetime.now(timezone.utc)
+        time_diff = decoded.exp - datetime.now(UTC)
         assert time_diff.total_seconds() <= 300
         assert time_diff.total_seconds() > 0
 
@@ -277,3 +284,77 @@ class TestAuthRoutes:
             json={"api_key": "test-key-12345678"},
         )
         assert response.status_code == 200
+
+
+class TestApiKeyHashing:
+    """Tests for API key hashing functions."""
+
+    def test_hash_api_key_produces_hex_string(self):
+        """Should produce a hex-encoded SHA-256 hash."""
+        result = _hash_api_key("my-secret-key")
+        assert isinstance(result, str)
+        assert len(result) == 64  # SHA-256 produces 32 bytes = 64 hex chars
+
+    def test_hash_api_key_is_deterministic(self):
+        """Same input should produce same hash."""
+        hash1 = _hash_api_key("same-key")
+        hash2 = _hash_api_key("same-key")
+        assert hash1 == hash2
+
+    def test_hash_api_key_different_inputs(self):
+        """Different inputs should produce different hashes."""
+        hash1 = _hash_api_key("key-one")
+        hash2 = _hash_api_key("key-two")
+        assert hash1 != hash2
+
+    def test_constant_time_compare_equal(self):
+        """Should return True for equal strings."""
+        assert _constant_time_compare("abc123", "abc123") is True
+
+    def test_constant_time_compare_not_equal(self):
+        """Should return False for different strings."""
+        assert _constant_time_compare("abc123", "xyz789") is False
+
+    def test_constant_time_compare_different_lengths(self):
+        """Should return False for different length strings."""
+        assert _constant_time_compare("short", "longerstring") is False
+
+
+class TestApiKeyStorage:
+    """Tests for API key storage integration."""
+
+    @pytest.fixture(autouse=True)
+    def cleanup(self):
+        """Clean up in-memory keys before and after each test."""
+        clear_memory_keys()
+        configure_api_key_repository(None)  # Ensure memory mode
+        yield
+        clear_memory_keys()
+        configure_api_key_repository(None)
+
+    @pytest.mark.asyncio
+    async def test_validate_api_key_returns_data(self):
+        """Should return key data for valid key."""
+        register_api_key("valid-key-123456", user_id=100, scopes=["chat"])
+
+        result = await validate_api_key("valid-key-123456")
+
+        assert result is not None
+        assert result["user_id"] == 100
+        assert result["scopes"] == ["chat"]
+
+    @pytest.mark.asyncio
+    async def test_validate_api_key_returns_none_for_invalid(self):
+        """Should return None for invalid key."""
+        result = await validate_api_key("nonexistent-key-123")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_clear_memory_keys_removes_all(self):
+        """Should clear all in-memory keys."""
+        register_api_key("key-to-clear-12", user_id=1, scopes=[])
+
+        clear_memory_keys()
+
+        result = await validate_api_key("key-to-clear-12")
+        assert result is None

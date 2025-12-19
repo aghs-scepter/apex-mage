@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from src.ports.repositories import (
+    ApiKey,
     Channel,
     Message,
     MessageImage,
@@ -61,6 +62,24 @@ CREATE TABLE IF NOT EXISTS channel_messages(
     FOREIGN KEY (channel_id) REFERENCES channels(channel_id),
     FOREIGN KEY (vendor_id) REFERENCES vendors(vendor_id)
 );
+"""
+
+_CREATE_API_KEYS_TABLE = """
+CREATE TABLE IF NOT EXISTS api_keys(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key_hash TEXT UNIQUE NOT NULL,
+    user_id INTEGER NOT NULL,
+    name TEXT,
+    scopes TEXT DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TEXT,
+    expires_at TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1
+);
+"""
+
+_CREATE_API_KEYS_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 """
 
 # =============================================================================
@@ -260,6 +279,30 @@ AND channel_messages.message_timestamp BETWEEN datetime('now', '-1 hour') AND da
 ;
 """
 
+# API Keys queries
+_INSERT_API_KEY = """
+INSERT INTO api_keys(key_hash, user_id, name, scopes, expires_at)
+VALUES (?, ?, ?, ?, ?);
+"""
+
+_SELECT_API_KEY_BY_HASH = """
+SELECT id, key_hash, user_id, name, scopes, created_at, last_used_at, expires_at, is_active
+FROM api_keys
+WHERE key_hash = ? AND is_active = 1;
+"""
+
+_UPDATE_API_KEY_LAST_USED = """
+UPDATE api_keys
+SET last_used_at = CURRENT_TIMESTAMP
+WHERE key_hash = ?;
+"""
+
+_REVOKE_API_KEY = """
+UPDATE api_keys
+SET is_active = 0
+WHERE key_hash = ?;
+"""
+
 
 # =============================================================================
 # Repository Implementation
@@ -337,6 +380,8 @@ class SQLiteRepository:
             self._connection.execute(_CREATE_CHANNELS_TABLE)
             self._connection.execute(_CREATE_VENDORS_TABLE)
             self._connection.execute(_CREATE_CHANNEL_MESSAGES_TABLE)
+            self._connection.execute(_CREATE_API_KEYS_TABLE)
+            self._connection.execute(_CREATE_API_KEYS_INDEX)
             self._connection.commit()
 
         await asyncio.to_thread(init_sync)
@@ -715,3 +760,104 @@ class SQLiteRepository:
             return row["count"] if row else 0
 
         return await asyncio.to_thread(query_sync)
+
+    # =========================================================================
+    # ApiKeyRepository Implementation
+    # =========================================================================
+
+    def _row_to_api_key(self, row: sqlite3.Row) -> ApiKey:
+        """Convert a database row to an ApiKey object."""
+        # Parse scopes from JSON string
+        scopes_json = row["scopes"] or "[]"
+        try:
+            scopes = json.loads(scopes_json)
+        except json.JSONDecodeError:
+            scopes = []
+
+        return ApiKey(
+            id=row["id"],
+            key_hash=row["key_hash"],
+            user_id=row["user_id"],
+            name=row["name"],
+            scopes=scopes,
+            created_at=row["created_at"],
+            last_used_at=row["last_used_at"],
+            expires_at=row["expires_at"],
+            is_active=bool(row["is_active"]),
+        )
+
+    async def get_api_key_by_hash(self, key_hash: str) -> ApiKey | None:
+        """Retrieve an API key by its hash."""
+        conn = self._ensure_connected()
+
+        def query_sync() -> sqlite3.Row | None:
+            cursor = conn.execute(_SELECT_API_KEY_BY_HASH, (key_hash,))
+            return cursor.fetchone()
+
+        row = await asyncio.to_thread(query_sync)
+        if row is None:
+            return None
+        return self._row_to_api_key(row)
+
+    async def create_api_key(self, api_key: ApiKey) -> ApiKey:
+        """Create a new API key record."""
+        conn = self._ensure_connected()
+
+        scopes_json = json.dumps(api_key.scopes)
+        expires_at = api_key.expires_at.isoformat() if api_key.expires_at else None
+
+        def insert_sync() -> int:
+            cursor = conn.execute(
+                _INSERT_API_KEY,
+                (
+                    api_key.key_hash,
+                    api_key.user_id,
+                    api_key.name,
+                    scopes_json,
+                    expires_at,
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid or 0
+
+        api_key_id = await asyncio.to_thread(insert_sync)
+        logger.debug(f"Created API key with id {api_key_id}")
+
+        # Return the created key with ID populated
+        return ApiKey(
+            id=api_key_id,
+            key_hash=api_key.key_hash,
+            user_id=api_key.user_id,
+            name=api_key.name,
+            scopes=api_key.scopes,
+            created_at=api_key.created_at,
+            last_used_at=api_key.last_used_at,
+            expires_at=api_key.expires_at,
+            is_active=api_key.is_active,
+        )
+
+    async def update_api_key_last_used(self, key_hash: str) -> None:
+        """Update the last_used_at timestamp for an API key."""
+        conn = self._ensure_connected()
+
+        def update_sync() -> None:
+            conn.execute(_UPDATE_API_KEY_LAST_USED, (key_hash,))
+            conn.commit()
+
+        await asyncio.to_thread(update_sync)
+        logger.debug(f"Updated last_used_at for API key hash {key_hash[:8]}...")
+
+    async def revoke_api_key(self, key_hash: str) -> bool:
+        """Revoke an API key by setting is_active to False."""
+        conn = self._ensure_connected()
+
+        def update_sync() -> int:
+            cursor = conn.execute(_REVOKE_API_KEY, (key_hash,))
+            conn.commit()
+            return cursor.rowcount
+
+        rows_affected = await asyncio.to_thread(update_sync)
+        if rows_affected > 0:
+            logger.info(f"Revoked API key hash {key_hash[:8]}...")
+            return True
+        return False

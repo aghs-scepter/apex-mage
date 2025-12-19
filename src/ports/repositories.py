@@ -15,6 +15,36 @@ from typing import Protocol
 
 
 @dataclass
+class ApiKey:
+    """Represents an API key for authentication.
+
+    API keys allow external clients to authenticate with the API.
+    Only the hash of the key is stored, never the plaintext.
+
+    Attributes:
+        id: Internal database ID for the API key.
+        key_hash: SHA-256 hash of the API key.
+        user_id: User ID associated with this key.
+        name: Optional friendly name for the key.
+        scopes: List of permission scopes granted to this key.
+        created_at: When the key was created.
+        last_used_at: When the key was last used.
+        expires_at: Optional expiration datetime.
+        is_active: Whether the key is active.
+    """
+
+    key_hash: str
+    user_id: int
+    id: int | None = None
+    name: str | None = None
+    scopes: list[str] = field(default_factory=list)
+    created_at: datetime | None = None
+    last_used_at: datetime | None = None
+    expires_at: datetime | None = None
+    is_active: bool = True
+
+
+@dataclass
 class Channel:
     """Represents a conversation channel/context.
 
@@ -648,5 +678,54 @@ class AsyncRateLimitRepository(Protocol):
 
         Returns:
             Number of recent image requests.
+        """
+        ...
+
+
+class AsyncApiKeyRepository(Protocol):
+    """Async protocol for API key persistence operations.
+
+    Implementations handle secure storage and retrieval of API keys.
+    Only hashed keys are stored, never plaintext.
+    """
+
+    async def get_by_hash(self, key_hash: str) -> ApiKey | None:
+        """Retrieve an API key by its hash.
+
+        Args:
+            key_hash: SHA-256 hash of the API key.
+
+        Returns:
+            The ApiKey if found and active, None otherwise.
+        """
+        ...
+
+    async def create(self, api_key: ApiKey) -> ApiKey:
+        """Create a new API key record.
+
+        Args:
+            api_key: The API key to create (with hashed key).
+
+        Returns:
+            The created ApiKey with populated id and timestamps.
+        """
+        ...
+
+    async def update_last_used(self, key_hash: str) -> None:
+        """Update the last_used_at timestamp for an API key.
+
+        Args:
+            key_hash: SHA-256 hash of the API key.
+        """
+        ...
+
+    async def revoke(self, key_hash: str) -> bool:
+        """Revoke an API key by setting is_active to False.
+
+        Args:
+            key_hash: SHA-256 hash of the API key.
+
+        Returns:
+            True if the key was found and revoked, False otherwise.
         """
         ...
