@@ -1,11 +1,14 @@
 """Tests for WebSocket functionality."""
 
 import json
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
+from src.api.auth import create_access_token
+from src.api.routes.websocket import router
 from src.api.websocket import (
     ConnectionManager,
     MessageTypes,
@@ -13,6 +16,7 @@ from src.api.websocket import (
     create_error_event,
     create_new_message_event,
     create_typing_event,
+    get_connection_manager,
 )
 
 
@@ -223,3 +227,258 @@ class TestMessageTypes:
         assert MessageTypes.ERROR == "error"
         assert MessageTypes.PING == "ping"
         assert MessageTypes.PONG == "pong"
+
+
+# ============================================================================
+# WebSocket Route Integration Tests
+# ============================================================================
+
+
+@pytest.fixture
+def websocket_app() -> FastAPI:
+    """Create a FastAPI app with WebSocket routes for testing."""
+    app = FastAPI()
+    app.include_router(router)
+    return app
+
+
+@pytest.fixture
+def websocket_client(websocket_app: FastAPI) -> TestClient:
+    """Create a test client for WebSocket testing."""
+    return TestClient(websocket_app)
+
+
+@pytest.fixture
+def valid_token() -> str:
+    """Create a valid JWT token for testing."""
+    return create_access_token(user_id=123)
+
+
+@pytest.fixture
+def autocleanup_manager():
+    """Ensure connection manager is clean before and after tests."""
+    manager = get_connection_manager()
+    # Clear any existing connections
+    manager._connections.clear()
+    yield manager
+    # Cleanup after test
+    manager._connections.clear()
+
+
+class TestConversationWebSocket:
+    """Tests for /ws/conversations/{conversation_id} endpoint."""
+
+    def test_connect_without_token(
+        self, websocket_client: TestClient, autocleanup_manager
+    ):
+        """Should allow connection without token."""
+        with websocket_client.websocket_connect("/ws/conversations/123") as ws:
+            # Connection succeeds
+            ws.send_json({"type": "ping", "payload": {}})
+            response = ws.receive_json()
+            assert response["type"] == "pong"
+
+    def test_connect_with_valid_token(
+        self, websocket_client: TestClient, valid_token: str, autocleanup_manager
+    ):
+        """Should authenticate user with valid token."""
+        with websocket_client.websocket_connect(
+            f"/ws/conversations/123?token={valid_token}"
+        ) as ws:
+            ws.send_json({"type": "ping", "payload": {}})
+            response = ws.receive_json()
+            assert response["type"] == "pong"
+
+    def test_connect_with_invalid_token(
+        self, websocket_client: TestClient, autocleanup_manager
+    ):
+        """Should allow connection with invalid token but log warning."""
+        # Invalid token still allows connection (optional auth)
+        with websocket_client.websocket_connect(
+            "/ws/conversations/123?token=invalid-token"
+        ) as ws:
+            ws.send_json({"type": "ping", "payload": {}})
+            response = ws.receive_json()
+            assert response["type"] == "pong"
+
+    def test_ping_pong(self, websocket_client: TestClient, autocleanup_manager):
+        """Should respond to ping with pong."""
+        with websocket_client.websocket_connect("/ws/conversations/456") as ws:
+            ws.send_json({"type": "ping", "payload": {}})
+            response = ws.receive_json()
+
+            assert response["type"] == "pong"
+            assert "timestamp" in response
+            assert response["payload"] == {}
+
+    def test_typing_indicator_authenticated(
+        self, websocket_client: TestClient, valid_token: str, autocleanup_manager
+    ):
+        """Should broadcast typing indicator when authenticated."""
+        with websocket_client.websocket_connect(
+            f"/ws/conversations/789?token={valid_token}"
+        ) as ws:
+            # Send typing indicator
+            ws.send_json({"type": "user_typing", "payload": {"is_typing": True}})
+
+            # Should receive the broadcast (we're the only client)
+            response = ws.receive_json()
+            assert response["type"] == "user_typing"
+            assert response["payload"]["conversation_id"] == 789
+            assert response["payload"]["user_id"] == 123  # from token
+            assert response["payload"]["is_typing"] is True
+
+    def test_typing_indicator_unauthenticated_ignored(
+        self, websocket_client: TestClient, autocleanup_manager
+    ):
+        """Should not broadcast typing indicator when not authenticated."""
+        with websocket_client.websocket_connect("/ws/conversations/789") as ws:
+            # Send typing indicator
+            ws.send_json({"type": "user_typing", "payload": {"is_typing": True}})
+
+            # Send ping to verify connection is still working
+            ws.send_json({"type": "ping", "payload": {}})
+            response = ws.receive_json()
+
+            # Should only get pong response, no typing broadcast
+            assert response["type"] == "pong"
+
+    def test_unknown_message_type(
+        self, websocket_client: TestClient, autocleanup_manager
+    ):
+        """Should handle unknown message types gracefully."""
+        with websocket_client.websocket_connect("/ws/conversations/123") as ws:
+            ws.send_json({"type": "unknown_type", "payload": {}})
+
+            # Should not crash, can still ping/pong
+            ws.send_json({"type": "ping", "payload": {}})
+            response = ws.receive_json()
+            assert response["type"] == "pong"
+
+    def test_invalid_json(self, websocket_client: TestClient, autocleanup_manager):
+        """Should return error for invalid JSON."""
+        with websocket_client.websocket_connect("/ws/conversations/123") as ws:
+            ws.send_text("not valid json {{{")
+            response = ws.receive_json()
+
+            assert response["type"] == "error"
+            assert response["payload"]["code"] == "INVALID_JSON"
+            assert "Invalid JSON" in response["payload"]["error"]
+
+    def test_client_disconnect(
+        self, websocket_client: TestClient, autocleanup_manager
+    ):
+        """Should handle clean client disconnection."""
+        manager = autocleanup_manager
+
+        with websocket_client.websocket_connect("/ws/conversations/111") as ws:
+            # Verify connection registered
+            assert manager.get_connection_count(111) == 1
+            ws.send_json({"type": "ping", "payload": {}})
+            ws.receive_json()
+
+        # After exiting context, connection should be cleaned up
+        # Note: The cleanup happens via WebSocketDisconnect exception
+        assert manager.get_connection_count(111) == 0
+
+
+class TestGlobalWebSocket:
+    """Tests for /ws/all endpoint."""
+
+    def test_requires_authentication(
+        self, websocket_client: TestClient, autocleanup_manager
+    ):
+        """Should reject connection without token."""
+        from starlette.websockets import WebSocketDisconnect
+
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with websocket_client.websocket_connect("/ws/all") as ws:
+                ws.send_json({"type": "ping", "payload": {}})
+
+        # WebSocket should be closed with code 4001
+        assert exc_info.value.code == 4001
+
+    def test_rejects_invalid_token(
+        self, websocket_client: TestClient, autocleanup_manager
+    ):
+        """Should reject connection with invalid token."""
+        from starlette.websockets import WebSocketDisconnect
+
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with websocket_client.websocket_connect(
+                "/ws/all?token=invalid-token"
+            ) as ws:
+                ws.send_json({"type": "ping", "payload": {}})
+
+        assert exc_info.value.code == 4001
+
+    def test_accepts_valid_token(
+        self, websocket_client: TestClient, valid_token: str, autocleanup_manager
+    ):
+        """Should accept connection with valid token."""
+        with websocket_client.websocket_connect(
+            f"/ws/all?token={valid_token}"
+        ) as ws:
+            ws.send_json({"type": "ping", "payload": {}})
+            response = ws.receive_json()
+            assert response["type"] == "pong"
+
+    def test_ping_pong(
+        self, websocket_client: TestClient, valid_token: str, autocleanup_manager
+    ):
+        """Should respond to ping with pong."""
+        with websocket_client.websocket_connect(
+            f"/ws/all?token={valid_token}"
+        ) as ws:
+            ws.send_json({"type": "ping", "payload": {}})
+            response = ws.receive_json()
+
+            assert response["type"] == "pong"
+            assert response["payload"] == {}
+            assert "timestamp" in response
+
+    def test_invalid_json(
+        self, websocket_client: TestClient, valid_token: str, autocleanup_manager
+    ):
+        """Should return error for invalid JSON."""
+        with websocket_client.websocket_connect(
+            f"/ws/all?token={valid_token}"
+        ) as ws:
+            ws.send_text("{{invalid json")
+            response = ws.receive_json()
+
+            assert response["type"] == "error"
+            assert response["payload"]["code"] == "INVALID_JSON"
+
+    def test_uses_conversation_id_zero(
+        self, websocket_client: TestClient, valid_token: str, autocleanup_manager
+    ):
+        """Should register with conversation_id=0 for global subscriptions."""
+        manager = autocleanup_manager
+
+        with websocket_client.websocket_connect(
+            f"/ws/all?token={valid_token}"
+        ) as ws:
+            # Verify connection registered with id=0
+            assert manager.get_connection_count(0) == 1
+            ws.send_json({"type": "ping", "payload": {}})
+            ws.receive_json()
+
+        # After disconnect
+        assert manager.get_connection_count(0) == 0
+
+    def test_client_disconnect(
+        self, websocket_client: TestClient, valid_token: str, autocleanup_manager
+    ):
+        """Should handle clean client disconnection."""
+        manager = autocleanup_manager
+
+        with websocket_client.websocket_connect(
+            f"/ws/all?token={valid_token}"
+        ) as ws:
+            assert manager.get_connection_count(0) == 1
+            ws.send_json({"type": "ping", "payload": {}})
+            ws.receive_json()
+
+        # Connection should be cleaned up after context exit
+        assert manager.get_connection_count(0) == 0
