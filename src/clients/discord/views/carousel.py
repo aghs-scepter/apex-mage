@@ -887,3 +887,328 @@ class ImageEditPerformView(discord.ui.View):
             }
             if self.on_complete:
                 await self.on_complete(self.interaction, error_data)
+
+
+class MultiImageCarouselView(discord.ui.View):
+    """A view that provides a multi-image selection carousel.
+
+    Allows users to select up to 3 images from a carousel of available images.
+    Selected images can be used for multi-image modification operations.
+    """
+
+    MAX_SELECTIONS = 3
+
+    def __init__(
+        self,
+        interaction: discord.Interaction,
+        files: list[dict[str, str]],
+        user: dict[str, Any] | None = None,
+        message: discord.Message | None = None,
+        on_select: (
+            Callable[
+                [discord.Interaction, list[dict[str, str]]],
+                Coroutine[Any, Any, None],
+            ]
+            | None
+        ) = None,
+    ) -> None:
+        """Initialize the multi-image carousel view.
+
+        Args:
+            interaction: The Discord interaction that triggered this view.
+            files: List of image file dicts with 'filename' and 'image' keys.
+            user: Optional user dict with 'name', 'id', and 'pfp' keys.
+            message: Optional message to edit when updating the view.
+            on_select: Callback when user confirms selection. Receives the
+                interaction and list of selected image dicts. Empty list
+                indicates cancellation.
+        """
+        super().__init__(timeout=180.0)
+        self.user = user
+        self.username, self.user_id, self.pfp = get_user_info(user)
+        self.embed: discord.Embed | None = None
+        self.files = files
+        self.embed_image: discord.File | None = None
+        self.current_index = 0
+        self.selected_indices: list[int] = []  # Track selected image indices
+        self.on_select = on_select
+        self.message = message
+        self.healthy = bool(self.files)
+
+    async def initialize(self, interaction: discord.Interaction) -> None:
+        """Initialize the multi-image carousel view."""
+        if not self.healthy:
+            self.embed, self.embed_image = await self.create_error_embed(
+                interaction,
+                "ERROR: There are no images in context. "
+                "Add or generate an image to use this feature.",
+            )
+            self.hide_buttons()
+            logger.error("carousel_no_files", view="MultiImageCarouselView")
+        else:
+            self.embed, self.embed_image = await self.create_embed(interaction)
+            self.update_buttons()
+            logger.debug("embed_created", view="MultiImageCarouselView")
+
+        if self.message:
+            if self.embed_image:
+                await self.message.edit(
+                    attachments=[self.embed_image],
+                    embed=self.embed,
+                    view=self,
+                )
+            else:
+                await self.message.edit(
+                    embed=self.embed,
+                    view=self,
+                )
+        logger.debug("view_initialized", view="MultiImageCarouselView")
+
+    def is_current_selected(self) -> bool:
+        """Check if the current image is in the selection."""
+        return self.current_index in self.selected_indices
+
+    def get_selected_images(self) -> list[dict[str, str]]:
+        """Get the list of selected image data dicts."""
+        return [self.files[i] for i in self.selected_indices]
+
+    def generate_image_chrono_bar(self, current_index: int, total: int) -> str:
+        """Generate a visual position indicator for the carousel.
+
+        Shows selected images with a different marker.
+        """
+        bar_icons = ""
+        for i in range(total):
+            if i == current_index:
+                # Current position - filled diamond
+                bar_icons += "\u2b25"
+            elif i in self.selected_indices:
+                # Selected but not current - checkmark
+                bar_icons += "\u2713"
+            else:
+                # Not selected - empty diamond
+                bar_icons += "\u2b26"
+        return f"(Newest) {bar_icons} (Oldest)"
+
+    def generate_selection_status(self) -> str:
+        """Generate a status string showing selected images."""
+        count = len(self.selected_indices)
+        if count == 0:
+            return "No images selected"
+
+        # Generate labels for selected images (1-indexed for user display)
+        labels = [f"Image {i + 1}" for i in self.selected_indices]
+        return f"Selected ({count}/{self.MAX_SELECTIONS}): " + ", ".join(labels)
+
+    async def create_error_embed(
+        self, interaction: discord.Interaction, error_message: str
+    ) -> tuple[discord.Embed, None]:
+        """Create an error embed."""
+        embed = discord.Embed(title="Error Message", description=error_message)
+        embed.set_author(
+            name=f"{self.username} (via Apex Mage)",
+            url="https://github.com/aghs-scepter/apex-mage",
+            icon_url=self.pfp,
+        )
+        return embed, None
+
+    async def create_embed(
+        self, interaction: discord.Interaction
+    ) -> tuple[discord.Embed, discord.File]:
+        """Create the carousel embed with current image and selection status."""
+        embed_image = await create_file_from_image(self.files[self.current_index])
+
+        embed = discord.Embed(
+            title="Select Images (up to 3)",
+            description=self.generate_image_chrono_bar(
+                self.current_index, len(self.files)
+            ),
+        )
+        embed.set_author(
+            name=f"{self.username} (via Apex Mage)",
+            url="https://github.com/aghs-scepter/apex-mage",
+            icon_url=self.pfp,
+        )
+        embed.add_field(
+            name="Selection",
+            value=self.generate_selection_status(),
+            inline=False,
+        )
+        embed.set_image(url=f"attachment://{embed_image.filename}")
+
+        return embed, embed_image
+
+    def disable_buttons(self) -> None:
+        """Disable all navigation and selection buttons."""
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+
+    def hide_buttons(self) -> None:
+        """Remove all navigation and selection buttons."""
+        self.clear_items()
+
+    def update_buttons(self) -> None:
+        """Update button states based on current position and selection."""
+        self.previous_button.disabled = self.current_index <= 0
+        self.next_button.disabled = self.current_index >= len(self.files) - 1
+
+        # Update toggle button based on current selection state
+        if self.is_current_selected():
+            self.toggle_button.label = "Remove"
+            self.toggle_button.style = discord.ButtonStyle.danger
+            self.toggle_button.disabled = False
+        else:
+            self.toggle_button.label = "Add"
+            self.toggle_button.style = discord.ButtonStyle.success
+            # Disable add if at max selections
+            self.toggle_button.disabled = (
+                len(self.selected_indices) >= self.MAX_SELECTIONS
+            )
+
+        # Continue button enabled when at least one image selected
+        self.continue_button.disabled = len(self.selected_indices) == 0
+
+    async def on_timeout(self) -> None:
+        """Update the embed on timeout."""
+        self.disable_buttons()
+        self.hide_buttons()
+        if self.embed:
+            self.embed.title = "Session Expired"
+            self.embed.description = (
+                "This interaction has timed out. Please start again."
+            )
+            self.embed.set_image(url=None)
+            self.embed.clear_fields()
+        try:
+            if self.message:
+                await self.message.edit(embed=self.embed, attachments=[], view=self)
+        except Exception:
+            pass  # Message may have been deleted
+
+    async def update_embed(self, interaction: discord.Interaction) -> None:
+        """Update the embed with the current image after navigation or selection."""
+        self.embed_image = await create_file_from_image(self.files[self.current_index])
+
+        if self.embed:
+            self.embed.description = self.generate_image_chrono_bar(
+                self.current_index, len(self.files)
+            )
+            self.embed.set_image(url=f"attachment://{self.embed_image.filename}")
+            # Update selection field
+            self.embed.clear_fields()
+            self.embed.add_field(
+                name="Selection",
+                value=self.generate_selection_status(),
+                inline=False,
+            )
+
+        self.update_buttons()
+
+        if self.message:
+            await self.message.edit(
+                attachments=[self.embed_image],
+                embed=self.embed,
+                view=self,
+            )
+
+    @discord.ui.button(label="<", style=discord.ButtonStyle.primary)
+    async def previous_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["MultiImageCarouselView"],
+    ) -> None:
+        """Navigate to previous image."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        if self.current_index > 0:
+            self.current_index -= 1
+            await self.update_embed(interaction)
+
+    @discord.ui.button(label=">", style=discord.ButtonStyle.primary)
+    async def next_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["MultiImageCarouselView"],
+    ) -> None:
+        """Navigate to next image."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        if self.current_index < len(self.files) - 1:
+            self.current_index += 1
+            await self.update_embed(interaction)
+
+    @discord.ui.button(label="Add", style=discord.ButtonStyle.success)
+    async def toggle_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["MultiImageCarouselView"],
+    ) -> None:
+        """Toggle selection of current image."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        if self.is_current_selected():
+            self.selected_indices.remove(self.current_index)
+        else:
+            if len(self.selected_indices) < self.MAX_SELECTIONS:
+                self.selected_indices.append(self.current_index)
+        await self.update_embed(interaction)
+
+    @discord.ui.button(label="Continue", style=discord.ButtonStyle.primary)
+    async def continue_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["MultiImageCarouselView"],
+    ) -> None:
+        """Confirm selection and continue."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+        if self.on_select:
+            await interaction.response.defer()
+            selected = self.get_selected_images()
+            self.hide_buttons()
+            await self.on_select(interaction, selected)
+
+    @discord.ui.button(label="X", style=discord.ButtonStyle.danger)
+    async def cancel_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["MultiImageCarouselView"],
+    ) -> None:
+        """Cancel image selection."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+        if self.on_select:
+            await interaction.response.defer()
+            self.hide_buttons()
+            if self.embed:
+                self.embed.title = "Selection Cancelled"
+                self.embed.description = "Image selection was cancelled."
+                self.embed.set_image(url=None)
+                self.embed.clear_fields()
+            if self.message:
+                await self.message.edit(embed=self.embed, attachments=[], view=self)
+            await self.on_select(interaction, [])  # Empty list = cancelled
