@@ -288,7 +288,7 @@ VALUES (?, ?, ?, ?, ?);
 _SELECT_API_KEY_BY_HASH = """
 SELECT id, key_hash, user_id, name, scopes, created_at, last_used_at, expires_at, is_active
 FROM api_keys
-WHERE key_hash = ? AND is_active = 1;
+WHERE key_hash = ? AND is_active = 1 AND (expires_at IS NULL OR expires_at > datetime('now'));
 """
 
 _UPDATE_API_KEY_LAST_USED = """
@@ -786,7 +786,7 @@ class SQLiteRepository:
             is_active=bool(row["is_active"]),
         )
 
-    async def get_api_key_by_hash(self, key_hash: str) -> ApiKey | None:
+    async def get_by_hash(self, key_hash: str) -> ApiKey | None:
         """Retrieve an API key by its hash."""
         conn = self._ensure_connected()
 
@@ -799,7 +799,7 @@ class SQLiteRepository:
             return None
         return self._row_to_api_key(row)
 
-    async def create_api_key(self, api_key: ApiKey) -> ApiKey:
+    async def create(self, api_key: ApiKey) -> ApiKey:
         """Create a new API key record."""
         conn = self._ensure_connected()
 
@@ -836,7 +836,7 @@ class SQLiteRepository:
             is_active=api_key.is_active,
         )
 
-    async def update_api_key_last_used(self, key_hash: str) -> None:
+    async def update_last_used(self, key_hash: str) -> None:
         """Update the last_used_at timestamp for an API key."""
         conn = self._ensure_connected()
 
@@ -847,7 +847,7 @@ class SQLiteRepository:
         await asyncio.to_thread(update_sync)
         logger.debug(f"Updated last_used_at for API key hash {key_hash[:8]}...")
 
-    async def revoke_api_key(self, key_hash: str) -> bool:
+    async def revoke(self, key_hash: str) -> bool:
         """Revoke an API key by setting is_active to False."""
         conn = self._ensure_connected()
 

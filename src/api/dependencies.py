@@ -127,6 +127,17 @@ class AppState:
         return self._repo_adapter
 
     @property
+    def sqlite_repository(self) -> SQLiteRepository:
+        """Get the underlying SQLite repository.
+
+        This provides direct access to the SQLiteRepository for operations
+        not exposed through RepositoryAdapter (e.g., API key storage).
+        """
+        if self._repository is None:
+            raise RuntimeError("App state not initialized")
+        return self._repository
+
+    @property
     def ai_provider(self) -> AIProvider:
         """Get the AI provider."""
         if self._ai_provider is None:

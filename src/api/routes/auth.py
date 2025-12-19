@@ -9,7 +9,7 @@ import hmac
 import os
 import secrets
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
@@ -23,7 +23,27 @@ from src.core.logging import get_logger
 from src.ports.repositories import ApiKey
 
 if TYPE_CHECKING:
-    from src.adapters.sqlite_repository import SQLiteRepository
+    pass
+
+
+class ApiKeyRepositoryProtocol(Protocol):
+    """Protocol for API key repository operations."""
+
+    async def get_by_hash(self, key_hash: str) -> ApiKey | None:
+        """Retrieve an API key by its hash."""
+        ...
+
+    async def create(self, api_key: ApiKey) -> ApiKey:
+        """Create a new API key record."""
+        ...
+
+    async def update_last_used(self, key_hash: str) -> None:
+        """Update the last_used_at timestamp for an API key."""
+        ...
+
+    async def revoke(self, key_hash: str) -> bool:
+        """Revoke an API key."""
+        ...
 
 logger = get_logger(__name__)
 
@@ -39,7 +59,7 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 _API_KEYS_MEMORY: dict[str, dict] = {}
 
 # Database repository (set by configure_api_key_repository)
-_api_key_repository: "SQLiteRepository | None" = None
+_api_key_repository: ApiKeyRepositoryProtocol | None = None
 
 # Flag to track if we've warned about in-memory mode
 _warned_about_memory_mode = False
@@ -70,7 +90,7 @@ def _constant_time_compare(a: str, b: str) -> bool:
     return hmac.compare_digest(a.encode(), b.encode())
 
 
-def configure_api_key_repository(repository: "SQLiteRepository | None") -> None:
+def configure_api_key_repository(repository: ApiKeyRepositoryProtocol | None) -> None:
     """Configure the API key repository for database-backed storage.
 
     Call this during application startup to enable persistent API key storage.
@@ -196,11 +216,11 @@ async def _lookup_api_key(api_key: str) -> dict | None:
 
     # Try database first if configured
     if _api_key_repository is not None:
-        db_key = await _api_key_repository.get_api_key_by_hash(key_hash)
+        db_key = await _api_key_repository.get_by_hash(key_hash)
         if db_key is not None:
             # Update last_used timestamp (fire and forget)
             try:
-                await _api_key_repository.update_api_key_last_used(key_hash)
+                await _api_key_repository.update_last_used(key_hash)
             except Exception as e:
                 logger.warning("failed_to_update_last_used", error=str(e))
 
@@ -244,7 +264,7 @@ async def _store_api_key(
             scopes=scopes,
             name=name,
         )
-        await _api_key_repository.create_api_key(db_key)
+        await _api_key_repository.create(db_key)
         logger.info(
             "api_key_created",
             user_id=user_id,

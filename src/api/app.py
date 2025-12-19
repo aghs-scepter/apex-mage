@@ -27,6 +27,7 @@ from src.api.routes import (
     images_router,
     websocket_router,
 )
+from src.api.routes.auth import configure_api_key_repository
 from src.core.health import HealthChecker, ServiceCheck, ServiceStatus
 from src.core.logging import get_logger
 
@@ -159,6 +160,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         chat_rate_limit=chat_limit,
         image_rate_limit=image_limit,
     )
+
+    # Configure API key repository for persistent storage
+    configure_api_key_repository(app_state.sqlite_repository)
 
     # Create health checker and attach to app state
     app.state.health_checker = _create_health_checker(app_state)

@@ -788,7 +788,7 @@ class TestApiKeyRepository:
             name="Test Key",
         )
 
-        created = await repo.create_api_key(api_key)
+        created = await repo.create(api_key)
 
         assert created.id is not None
         assert created.id > 0
@@ -798,42 +798,42 @@ class TestApiKeyRepository:
         assert created.name == "Test Key"
         assert created.is_active is True
 
-    async def test_get_api_key_by_hash_exists(self, repo: SQLiteRepository) -> None:
+    async def test_get_by_hash_exists(self, repo: SQLiteRepository) -> None:
         """Test retrieving an API key by hash."""
         api_key = ApiKey(
             key_hash="findmehash123",
             user_id=99,
             scopes=["admin"],
         )
-        await repo.create_api_key(api_key)
+        await repo.create(api_key)
 
-        found = await repo.get_api_key_by_hash("findmehash123")
+        found = await repo.get_by_hash("findmehash123")
 
         assert found is not None
         assert found.key_hash == "findmehash123"
         assert found.user_id == 99
         assert found.scopes == ["admin"]
 
-    async def test_get_api_key_by_hash_not_exists(
+    async def test_get_by_hash_not_exists(
         self, repo: SQLiteRepository
     ) -> None:
-        """Test that get_api_key_by_hash returns None for missing key."""
-        result = await repo.get_api_key_by_hash("nonexistent")
+        """Test that get_by_hash returns None for missing key."""
+        result = await repo.get_by_hash("nonexistent")
         assert result is None
 
-    async def test_get_api_key_by_hash_inactive_returns_none(
+    async def test_get_by_hash_inactive_returns_none(
         self, repo: SQLiteRepository
     ) -> None:
-        """Test that get_api_key_by_hash returns None for revoked keys."""
+        """Test that get_by_hash returns None for revoked keys."""
         api_key = ApiKey(
             key_hash="revokedkey123",
             user_id=50,
             scopes=["chat"],
         )
-        await repo.create_api_key(api_key)
-        await repo.revoke_api_key("revokedkey123")
+        await repo.create(api_key)
+        await repo.revoke("revokedkey123")
 
-        result = await repo.get_api_key_by_hash("revokedkey123")
+        result = await repo.get_by_hash("revokedkey123")
         assert result is None
 
     async def test_update_last_used(self, repo: SQLiteRepository) -> None:
@@ -843,42 +843,42 @@ class TestApiKeyRepository:
             user_id=1,
             scopes=[],
         )
-        await repo.create_api_key(api_key)
+        await repo.create(api_key)
 
         # Initially last_used_at should be None
-        initial = await repo.get_api_key_by_hash("lastusedhash")
+        initial = await repo.get_by_hash("lastusedhash")
         assert initial is not None
         assert initial.last_used_at is None
 
         # Update last_used
-        await repo.update_api_key_last_used("lastusedhash")
+        await repo.update_last_used("lastusedhash")
 
         # Now last_used_at should be set
-        updated = await repo.get_api_key_by_hash("lastusedhash")
+        updated = await repo.get_by_hash("lastusedhash")
         assert updated is not None
         assert updated.last_used_at is not None
 
-    async def test_revoke_api_key(self, repo: SQLiteRepository) -> None:
+    async def test_revoke(self, repo: SQLiteRepository) -> None:
         """Test revoking an API key."""
         api_key = ApiKey(
             key_hash="toberevokedhash",
             user_id=100,
             scopes=["chat"],
         )
-        await repo.create_api_key(api_key)
+        await repo.create(api_key)
 
-        result = await repo.revoke_api_key("toberevokedhash")
+        result = await repo.revoke("toberevokedhash")
 
         assert result is True
         # Key should no longer be findable
-        found = await repo.get_api_key_by_hash("toberevokedhash")
+        found = await repo.get_by_hash("toberevokedhash")
         assert found is None
 
     async def test_revoke_nonexistent_key_returns_false(
         self, repo: SQLiteRepository
     ) -> None:
         """Test that revoking a non-existent key returns False."""
-        result = await repo.revoke_api_key("doesnotexist")
+        result = await repo.revoke("doesnotexist")
         assert result is False
 
     async def test_create_api_key_with_no_scopes(
@@ -891,9 +891,9 @@ class TestApiKeyRepository:
             scopes=[],
         )
 
-        await repo.create_api_key(api_key)
+        await repo.create(api_key)
 
-        found = await repo.get_api_key_by_hash("noscopeshash")
+        found = await repo.get_by_hash("noscopeshash")
         assert found is not None
         assert found.scopes == []
 
@@ -906,7 +906,7 @@ class TestApiKeyRepository:
             user_id=1,
             scopes=[],
         )
-        await repo.create_api_key(api_key1)
+        await repo.create(api_key1)
 
         api_key2 = ApiKey(
             key_hash="duplicatehash",  # Same hash
@@ -918,4 +918,46 @@ class TestApiKeyRepository:
         import sqlite3
 
         with pytest.raises(sqlite3.IntegrityError):
-            await repo.create_api_key(api_key2)
+            await repo.create(api_key2)
+
+    async def test_get_by_hash_expired_returns_none(
+        self, repo: SQLiteRepository
+    ) -> None:
+        """Test that get_by_hash returns None for expired keys."""
+        from datetime import datetime, timedelta
+
+        # Create an API key with an expiration date in the past
+        expired_at = datetime.utcnow() - timedelta(hours=1)
+        api_key = ApiKey(
+            key_hash="expiredkeyhash",
+            user_id=77,
+            scopes=["chat"],
+            expires_at=expired_at,
+        )
+        await repo.create(api_key)
+
+        # Should return None because the key is expired
+        result = await repo.get_by_hash("expiredkeyhash")
+        assert result is None
+
+    async def test_get_by_hash_not_expired_returns_key(
+        self, repo: SQLiteRepository
+    ) -> None:
+        """Test that get_by_hash returns key that is not yet expired."""
+        from datetime import datetime, timedelta
+
+        # Create an API key with an expiration date in the future
+        expires_at = datetime.utcnow() + timedelta(hours=24)
+        api_key = ApiKey(
+            key_hash="validkeyhash",
+            user_id=88,
+            scopes=["admin"],
+            expires_at=expires_at,
+        )
+        await repo.create(api_key)
+
+        # Should return the key because it's not expired yet
+        result = await repo.get_by_hash("validkeyhash")
+        assert result is not None
+        assert result.key_hash == "validkeyhash"
+        assert result.user_id == 88
