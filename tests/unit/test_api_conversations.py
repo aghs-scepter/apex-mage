@@ -21,7 +21,7 @@ def mock_repo():
     repo.create_channel = AsyncMock()
     repo.add_message = AsyncMock()
     repo.get_visible_messages = AsyncMock(return_value=[])
-    repo.deactivate_all_messages = AsyncMock()
+    repo.clear_messages = AsyncMock()
     return repo
 
 
@@ -248,7 +248,7 @@ class TestClearConversation:
         response = client.delete("/conversations/123")
 
         assert response.status_code == 204
-        mock_repo.deactivate_all_messages.assert_called_once_with(123)
+        mock_repo.clear_messages.assert_called_once_with(123, "All Models")
 
 
 class TestSchemas:

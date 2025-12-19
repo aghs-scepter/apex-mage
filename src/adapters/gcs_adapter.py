@@ -1,9 +1,10 @@
 """Google Cloud Storage adapter for uploading content.
 
-This module provides a GCSAdapter class for uploading text content to
+This module provides a GCSAdapter class for uploading text and image content to
 Google Cloud Storage, returning public URLs for the uploaded files.
 """
 
+import base64
 import logging
 from typing import cast
 from uuid import uuid4
@@ -26,7 +27,7 @@ class GCSUploadError(Exception):
         self,
         message: str,
         message_type: str,
-        channel_id: int,
+        channel_id: int | str,
         original_error: Exception | None = None,
     ) -> None:
         """Initialize a GCSUploadError.
@@ -46,7 +47,7 @@ class GCSUploadError(Exception):
 class GCSAdapter:
     """Adapter for uploading content to Google Cloud Storage.
 
-    This class provides methods for uploading text content to GCS and
+    This class provides methods for uploading text and image content to GCS and
     returning public URLs. It wraps the google-cloud-storage client
     and provides proper error handling and logging.
 
@@ -55,7 +56,7 @@ class GCSAdapter:
         url = adapter.upload_text(
             message_type="response",
             channel_id=12345,
-            content="# Long Response\\nContent here..."
+            content="# Long Response\nContent here..."
         )
         print(f"Uploaded to: {url}")
     """
@@ -146,5 +147,80 @@ class GCSAdapter:
                 message=f"Failed to upload {message_type} to GCS: {ex}",
                 message_type=message_type,
                 channel_id=channel_id,
+                original_error=ex,
+            ) from ex
+
+    def upload_image(
+        self,
+        image_type: str,
+        user_id: int | str,
+        image_data: str,
+        image_format: str,
+    ) -> str:
+        """Upload image content to GCS and return the public URL.
+
+        The image is uploaded with the following path pattern:
+        images/{image_type}/{user_id}/{uuid}/image.{format}
+
+        Args:
+            image_type: Type of image (e.g., "generated", "modified").
+                Used in the blob path.
+            user_id: The user ID for organizing uploads.
+            image_data: The base64-encoded image data.
+            image_format: The image format (e.g., "jpeg", "png").
+
+        Returns:
+            str: The public URL of the uploaded file.
+
+        Raises:
+            GCSUploadError: If the upload fails for any reason.
+        """
+        logger.debug(
+            "Uploading image to GCS",
+            extra={
+                "image_type": image_type,
+                "user_id": user_id,
+                "image_format": image_format,
+                "data_length": len(image_data),
+            },
+        )
+
+        try:
+            client = self._get_client()
+            bucket = client.bucket(self._bucket_name)
+            blob_path = f"images/{image_type}/{user_id}/{uuid4()}/image.{image_format}"
+            blob = bucket.blob(blob_path)
+
+            # Decode base64 image data
+            image_bytes = base64.b64decode(image_data)
+            content_type = f"image/{image_format}"
+
+            blob.upload_from_string(image_bytes, content_type=content_type)
+            url = cast(str, blob.public_url)
+
+            logger.debug(
+                "Successfully uploaded image to GCS",
+                extra={
+                    "image_type": image_type,
+                    "user_id": user_id,
+                    "url": url,
+                },
+            )
+            return url
+
+        except Exception as ex:
+            logger.error(
+                "Failed to upload image to GCS",
+                extra={
+                    "image_type": image_type,
+                    "user_id": user_id,
+                    "error": str(ex),
+                },
+                exc_info=True,
+            )
+            raise GCSUploadError(
+                message=f"Failed to upload {image_type} image to GCS: {ex}",
+                message_type=image_type,
+                channel_id=user_id,
                 original_error=ex,
             ) from ex

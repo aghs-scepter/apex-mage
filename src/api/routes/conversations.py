@@ -364,7 +364,7 @@ async def clear_conversation(
 
     try:
         logger.info("clearing_conversation", user_id=user.user_id)
-        await repo.deactivate_all_messages(conversation_id)
+        await repo.clear_messages(conversation_id, "All Models")
         logger.info("conversation_cleared")
 
     finally:
