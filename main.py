@@ -3,6 +3,8 @@
 import asyncio
 import os
 
+import discord
+
 from src.clients.discord import (
     DiscordBot,
     create_bot,
@@ -162,12 +164,23 @@ async def main() -> None:
     # Set up on_ready event handler
     @bot.event
     async def on_ready() -> None:
-        """On bot startup, log success and register commands for all guilds."""
+        """On bot startup, log success and set presence.
+
+        Note: Command syncing is controlled by SYNC_COMMANDS env var in setup_hook.
+        We no longer sync per-guild on every startup to avoid hitting Discord's
+        200 command creates per day rate limit.
+        """
         if bot.user:
             logger.info("bot_ready", user=str(bot.user), user_id=bot.user.id)
+
+        # Set bot presence (doesn't require syncing)
+        await bot.change_presence(
+            activity=discord.CustomActivity(name="/help for commands")
+        )
+
+        # Log connected guilds without syncing
         for guild in bot.guilds:
-            await bot.register_commands(guild)
-            logger.info("commands_registered", guild=guild.name, guild_id=guild.id)
+            logger.info("guild_connected", guild=guild.name, guild_id=guild.id)
 
     try:
         # Start the bot

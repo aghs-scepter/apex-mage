@@ -144,8 +144,14 @@ class DiscordBot(discord.Client):
             image_limit=image_rate_limit,
         )
 
-        # Sync commands with Discord
-        await self.tree.sync()
+        # Only sync commands when explicitly requested via environment variable.
+        # Discord has a strict rate limit of 200 command creates per day.
+        # Normal restarts should NOT sync; only sync when deploying new commands.
+        if getenv("SYNC_COMMANDS", "").lower() == "true":
+            await self.tree.sync()
+            logger.info("commands_synced_globally")
+        else:
+            logger.info("command_sync_skipped", reason="SYNC_COMMANDS not set")
 
     async def close(self) -> None:
         """Clean up resources when the client is closing."""
@@ -157,13 +163,13 @@ class DiscordBot(discord.Client):
     async def register_commands(self, guild: discord.Guild) -> None:
         """Register commands for a specific guild.
 
+        Called when joining a new guild. Uses guild-specific sync which
+        has the same 200/day rate limit but is appropriate for new guilds.
+
         Args:
             guild: The guild to register commands for.
         """
         await self.tree.sync(guild=guild)
-        await self.change_presence(
-            activity=discord.CustomActivity(name="/help for commands")
-        )
         logger.info("commands_registered", guild=guild.name, guild_id=guild.id)
 
     async def on_guild_join(self, guild: discord.Guild) -> None:
