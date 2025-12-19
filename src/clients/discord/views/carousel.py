@@ -364,10 +364,26 @@ class ImageSelectionTypeView(discord.ui.View):
             return
 
         if self.on_select:
+            await interaction.response.defer()
             self.hide_buttons()
+            if self.embed:
+                self.embed.title = "Operation Cancelled"
+                self.embed.description = "Image modification was cancelled."
             if self.message:
-                await self.message.edit(view=self)
+                await self.message.edit(embed=self.embed, view=self)
             await self.on_select(interaction, "Cancel")
+
+    async def on_timeout(self) -> None:
+        """Update the embed on timeout."""
+        self.hide_buttons()
+        if self.embed:
+            self.embed.title = "Session Expired"
+            self.embed.description = "This interaction has timed out. Please start again."
+        if self.message:
+            try:
+                await self.message.edit(embed=self.embed, view=self)
+            except Exception:
+                pass  # Message may have been deleted
 
 
 class ImageCarouselView(discord.ui.View):
@@ -463,14 +479,18 @@ class ImageCarouselView(discord.ui.View):
         self.next_button.disabled = self.current_index >= len(self.files) - 1
 
     async def on_timeout(self) -> None:
-        """Disable all buttons on timeout."""
+        """Update the embed on timeout."""
         self.disable_buttons()
         self.hide_buttons()
+        if self.embed:
+            self.embed.title = "Session Expired"
+            self.embed.description = "This interaction has timed out. Please start again."
+            self.embed.set_image(url=None)
         try:
             if self.message:
-                await self.message.edit(view=self)
+                await self.message.edit(embed=self.embed, attachments=[], view=self)
         except Exception:
-            pass
+            pass  # Message may have been deleted
 
     async def create_embed(
         self, interaction: discord.Interaction
@@ -567,8 +587,12 @@ class ImageCarouselView(discord.ui.View):
         if self.on_select:
             await interaction.response.defer()
             self.hide_buttons()
+            if self.embed:
+                self.embed.title = "Selection Cancelled"
+                self.embed.description = "Image selection was cancelled."
+                self.embed.set_image(url=None)
             if self.message:
-                await self.message.edit(view=self)
+                await self.message.edit(embed=self.embed, attachments=[], view=self)
             await self.on_select(interaction, None)
 
 
@@ -665,11 +689,29 @@ class ImageEditTypeView(discord.ui.View):
                 )
                 return
 
+            await interaction.response.defer()
             self.disable_buttons()
             self.hide_buttons()
+            if self.embed:
+                self.embed.title = "Edit Cancelled"
+                self.embed.description = "Image editing was cancelled."
+                self.embed.set_image(url=None)
             if self.message:
-                await self.message.edit(view=self)
+                await self.message.edit(embed=self.embed, attachments=[], view=self)
             await self.on_select(interaction, "Cancel", "")
+
+    async def on_timeout(self) -> None:
+        """Update the embed on timeout."""
+        self.hide_buttons()
+        if self.embed:
+            self.embed.title = "Session Expired"
+            self.embed.description = "This interaction has timed out. Please start again."
+            self.embed.set_image(url=None)
+        if self.message:
+            try:
+                await self.message.edit(embed=self.embed, attachments=[], view=self)
+            except Exception:
+                pass  # Message may have been deleted
 
 
 class ImageEditPromptModal(discord.ui.Modal, title="Image Edit Instructions"):

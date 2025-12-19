@@ -357,15 +357,10 @@ def register_image_commands(bot: "DiscordBot") -> None:
         ) -> None:
             """Handle edit type and prompt selection."""
             if edit_type == "Cancel":
-                cancel_view = InfoEmbedView(
-                    message=interaction.message,
-                    user=embed_user,
-                    title="Operation Cancelled",
-                    description="Image modification was cancelled.",
-                    is_error=False,
-                    image_data=None,
-                )
-                await cancel_view.initialize(edit_interaction)
+                # Embed already updated by the view's cancel handler
+                # Just need to respond to the interaction if needed
+                if not edit_interaction.response.is_done():
+                    await edit_interaction.response.defer()
                 return
 
             await edit_interaction.response.defer()
@@ -407,15 +402,8 @@ def register_image_commands(bot: "DiscordBot") -> None:
             nonlocal selected_image
 
             if image_data is None:
-                cancel_view = InfoEmbedView(
-                    message=interaction.message,
-                    user=embed_user,
-                    title="Operation Cancelled",
-                    description="Image modification was cancelled.",
-                    is_error=False,
-                    image_data=None,
-                )
-                await cancel_view.initialize(img_interaction)
+                # Embed already updated by the view's cancel handler
+                # Nothing more to do
                 return
 
             selected_image = image_data
@@ -433,15 +421,10 @@ def register_image_commands(bot: "DiscordBot") -> None:
         ) -> None:
             """Handle selection type choice."""
             if selection_type == "Cancel":
-                cancel_view = InfoEmbedView(
-                    message=interaction.message,
-                    user=embed_user,
-                    title="Operation Cancelled",
-                    description="Image modification was cancelled.",
-                    is_error=False,
-                    image_data=None,
-                )
-                await cancel_view.initialize(sel_interaction)
+                # Embed already updated by the view's cancel handler
+                # Just need to respond to the interaction if needed
+                if not sel_interaction.response.is_done():
+                    await sel_interaction.response.defer()
                 return
 
             if selection_type == "Recent Images":
