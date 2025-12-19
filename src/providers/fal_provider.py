@@ -304,15 +304,18 @@ class FalAIProvider:
         self,
         request: ImageModifyRequest,
     ) -> list[GeneratedImage]:
-        """Modify an existing image based on a text prompt.
+        """Modify one or more existing images based on a text prompt.
 
         Uses Fal.AI's nano-banana-pro/edit model to transform the input
-        image according to the prompt.
+        image(s) according to the prompt. Supports up to 3 source images
+        when image_data_list is provided.
 
         Args:
-            request: An ImageModifyRequest containing the source image
+            request: An ImageModifyRequest containing the source image(s)
                 and modification prompt. Note: guidance_scale is ignored
                 as the nano-banana-pro/edit API does not support it.
+                When image_data_list is provided, those images are used;
+                otherwise falls back to image_data for single image.
 
         Returns:
             A list of GeneratedImage objects containing the modified images.
@@ -322,19 +325,29 @@ class FalAIProvider:
         """
         logger.debug("Modifying image with prompt: %s", request.prompt)
 
-        # Decode base64 image data and upload to Fal.AI
-        try:
-            image_bytes = base64.b64decode(request.image_data)
-        except Exception as ex:
-            raise FalAIError(f"Invalid base64 image data: {ex}") from ex
+        # Support both single image (image_data) and multiple images (image_data_list)
+        image_data_list = request.image_data_list or [request.image_data]
 
-        image_url = await self._upload_image(image_bytes, "image.jpeg")
+        # Upload all images and collect URLs
+        image_urls: list[str] = []
+        for i, img_data in enumerate(image_data_list):
+            try:
+                image_bytes = base64.b64decode(img_data)
+            except Exception as ex:
+                raise FalAIError(
+                    f"Invalid base64 image data for image {i + 1}: {ex}"
+                ) from ex
+
+            image_url = await self._upload_image(image_bytes, f"image_{i}.jpeg")
+            image_urls.append(image_url)
+
+        logger.debug("Uploaded %d images for modification", len(image_urls))
 
         # Build arguments for the nano-banana-pro/edit endpoint
         # Note: guidance_scale and num_inference_steps are NOT supported
         # by this API, so we don't include them
         arguments: dict[str, Any] = {
-            "image_urls": [image_url],
+            "image_urls": image_urls,
             "prompt": request.prompt,
             "aspect_ratio": "auto",
             "resolution": "1K",

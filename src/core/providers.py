@@ -91,17 +91,23 @@ class ImageModifyRequest:
     an existing image is modified based on a prompt.
 
     Attributes:
-        image_data: Base64-encoded image data to modify.
+        image_data: Base64-encoded image data to modify. Required for backward
+            compatibility when modifying a single image.
         prompt: Text description of how to modify the image.
         guidance_scale: How closely to follow the prompt vs preserve the
             original image. Higher values follow the prompt more closely.
             Typical range is 1.0-20.0, with lower values preserving more
             of the original image.
+        image_data_list: Optional list of base64-encoded image data for
+            multi-image modification. When provided, these images are used
+            instead of image_data. Supports up to 3 images for providers
+            that support multi-image input (e.g., nano-banana-pro/edit).
     """
 
     image_data: str
     prompt: str
     guidance_scale: float = 7.5
+    image_data_list: list[str] | None = None
 
 
 @dataclass

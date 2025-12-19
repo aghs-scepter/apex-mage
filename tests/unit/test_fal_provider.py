@@ -377,7 +377,7 @@ class TestImageModification:
             mock_upload.assert_called_once()
             call_kwargs = mock_upload.call_args.kwargs
             assert call_kwargs["content_type"] == "image/jpeg"
-            assert call_kwargs["file_name"] == "image.jpeg"
+            assert call_kwargs["file_name"] == "image_0.jpeg"
 
     @pytest.mark.asyncio
     async def test_modify_passes_image_urls(
@@ -919,3 +919,106 @@ class TestQueueUpdateCallback:
         provider._on_queue_update({"status": "waiting"})
         provider._on_queue_update(MagicMock())
         provider._on_queue_update(None)
+
+
+class TestMultiImageModification:
+    """Tests for multi-image modification functionality."""
+
+    @pytest.fixture
+    def provider(self) -> FalAIProvider:
+        """Create a FalAIProvider for testing."""
+        return FalAIProvider(api_key="test-key")
+
+    @pytest.fixture
+    def sample_image_data(self) -> str:
+        """Create sample base64 image data."""
+        # Minimal valid JPEG header for testing
+        jpeg_bytes = bytes([0xFF, 0xD8, 0xFF, 0xE0])
+        return base64.b64encode(jpeg_bytes).decode("utf-8")
+
+    @pytest.mark.asyncio
+    async def test_modify_with_image_data_list(
+        self, provider: FalAIProvider, sample_image_data: str
+    ) -> None:
+        """Test that modify uploads multiple images when image_data_list is provided."""
+        mock_response = {"images": [{"url": "https://fal.ai/modified.jpg"}]}
+        mock_handler = create_mock_handler(mock_response)
+
+        with patch(
+            "src.providers.fal_provider.fal_client.upload"
+        ) as mock_upload, patch(
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_upload.side_effect = [
+                "https://fal.ai/uploaded_0.jpg",
+                "https://fal.ai/uploaded_1.jpg",
+                "https://fal.ai/uploaded_2.jpg",
+            ]
+            mock_submit.return_value = mock_handler
+
+            request = ImageModifyRequest(
+                image_data=sample_image_data,  # Required for backward compat
+                prompt="Combine these images",
+                image_data_list=[sample_image_data, sample_image_data, sample_image_data],
+            )
+            await provider.modify(request)
+
+            # Should have uploaded 3 images
+            assert mock_upload.call_count == 3
+
+            # Verify all URLs were passed to the API
+            call_kwargs = mock_submit.call_args.kwargs
+            assert call_kwargs["arguments"]["image_urls"] == [
+                "https://fal.ai/uploaded_0.jpg",
+                "https://fal.ai/uploaded_1.jpg",
+                "https://fal.ai/uploaded_2.jpg",
+            ]
+
+    @pytest.mark.asyncio
+    async def test_modify_image_data_list_filenames(
+        self, provider: FalAIProvider, sample_image_data: str
+    ) -> None:
+        """Test that multi-image upload uses correct filenames."""
+        mock_response = {"images": [{"url": "https://fal.ai/modified.jpg"}]}
+        mock_handler = create_mock_handler(mock_response)
+
+        with patch(
+            "src.providers.fal_provider.fal_client.upload"
+        ) as mock_upload, patch(
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_upload.return_value = "https://fal.ai/uploaded.jpg"
+            mock_submit.return_value = mock_handler
+
+            request = ImageModifyRequest(
+                image_data=sample_image_data,
+                prompt="Test",
+                image_data_list=[sample_image_data, sample_image_data],
+            )
+            await provider.modify(request)
+
+            # Verify filenames are numbered correctly
+            calls = mock_upload.call_args_list
+            assert calls[0].kwargs["file_name"] == "image_0.jpeg"
+            assert calls[1].kwargs["file_name"] == "image_1.jpeg"
+
+    @pytest.mark.asyncio
+    @pytest.mark.asyncio
+    async def test_modify_invalid_image_in_list_raises_error(
+        self, provider: FalAIProvider
+    ) -> None:
+        """Test that invalid base64 in image_data_list raises descriptive error."""
+        # Use invalid base64 as FIRST image to avoid network calls
+        request = ImageModifyRequest(
+            image_data="not-valid-base64!!!",  # Invalid, will fail first
+            prompt="Test",
+            image_data_list=["not-valid-base64!!!"],  # Invalid base64
+        )
+
+        with pytest.raises(FalAIError) as exc_info:
+            await provider.modify(request)
+
+        # Error should mention invalid base64 for image 1
+        error_msg = str(exc_info.value).lower()
+        assert "invalid base64" in error_msg
+        assert "image 1" in error_msg
