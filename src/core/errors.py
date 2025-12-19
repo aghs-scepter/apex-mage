@@ -25,8 +25,9 @@ Example:
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from enum import Enum, auto
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from src.core.logging import get_logger
 
@@ -211,13 +212,13 @@ def is_retryable(category: ErrorCategory) -> bool:
 
 
 async def retry_with_backoff(
-    func,
-    *args,
+    func: Callable[..., Awaitable[T]],
+    *args: object,
     max_retries: int = 3,
     base_delay: float = 1.0,
     max_delay: float = 30.0,
     exponential_base: float = 2.0,
-    **kwargs,
+    **kwargs: object,
 ) -> T:
     """Retry a function with exponential backoff for transient errors.
 

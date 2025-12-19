@@ -17,7 +17,7 @@ Usage:
 import logging
 import sys
 from os import getenv
-from typing import Any
+from typing import Any, cast
 
 import structlog
 from structlog.types import Processor
@@ -105,7 +105,7 @@ def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
     Returns:
         A bound structlog logger instance.
     """
-    return structlog.get_logger(name)
+    return cast(structlog.stdlib.BoundLogger, structlog.get_logger(name))
 
 
 def bind_contextvars(**kwargs: Any) -> None:

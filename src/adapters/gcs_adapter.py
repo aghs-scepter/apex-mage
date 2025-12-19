@@ -5,6 +5,7 @@ Google Cloud Storage, returning public URLs for the uploaded files.
 """
 
 import logging
+from typing import cast
 from uuid import uuid4
 
 from google.cloud import storage
@@ -119,7 +120,7 @@ class GCSAdapter:
             blob_path = f"overflow_{message_type}s/{channel_id}/{uuid4()}/response.md"
             blob = bucket.blob(blob_path)
             blob.upload_from_string(content, content_type="text/markdown")
-            url = blob.public_url
+            url = cast(str, blob.public_url)
 
             logger.debug(
                 "Successfully uploaded content to GCS",

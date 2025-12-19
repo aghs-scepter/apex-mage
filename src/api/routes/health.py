@@ -4,7 +4,7 @@ These routes provide health, readiness, and liveness endpoints
 for container orchestration and monitoring systems.
 """
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Request, Response
 
@@ -33,7 +33,7 @@ async def health_check(request: Request, response: Response) -> dict[str, Any]:
         checks={c.name: c.status.value for c in report.checks},
     )
 
-    return report.to_dict()
+    return cast(dict[str, Any], report.to_dict())
 
 
 @router.get("/ready")

@@ -15,7 +15,7 @@ import json
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from src.ports.repositories import (
     ApiKey,
@@ -420,7 +420,7 @@ class SQLiteRepository:
 
         def query_sync() -> sqlite3.Row | None:
             cursor = conn.execute(_SELECT_CHANNEL, (external_id,))
-            return cursor.fetchone()
+            return cast(sqlite3.Row | None, cursor.fetchone())
 
         row = await asyncio.to_thread(query_sync)
         if row is None:
@@ -462,7 +462,7 @@ class SQLiteRepository:
 
         def query_sync() -> sqlite3.Row | None:
             cursor = conn.execute(_SELECT_VENDOR, (name,))
-            return cursor.fetchone()
+            return cast(sqlite3.Row | None, cursor.fetchone())
 
         row = await asyncio.to_thread(query_sync)
         if row is None:
@@ -666,7 +666,7 @@ class SQLiteRepository:
                 _SELECT_HAS_IMAGES_IN_CONTEXT,
                 (channel_external_id, vendor_name, vendor_name),
             )
-            return cursor.fetchone()
+            return cast(sqlite3.Row | None, cursor.fetchone())
 
         row = await asyncio.to_thread(query_sync)
         return row is not None
@@ -792,7 +792,7 @@ class SQLiteRepository:
 
         def query_sync() -> sqlite3.Row | None:
             cursor = conn.execute(_SELECT_API_KEY_BY_HASH, (key_hash,))
-            return cursor.fetchone()
+            return cast(sqlite3.Row | None, cursor.fetchone())
 
         row = await asyncio.to_thread(query_sync)
         if row is None:
