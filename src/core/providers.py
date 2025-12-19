@@ -185,7 +185,7 @@ class AIProvider(Protocol):
         """
         ...
 
-    async def chat_stream(
+    def chat_stream(
         self,
         messages: list[ChatMessage],
         *,

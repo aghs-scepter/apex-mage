@@ -764,7 +764,7 @@ class ImageEditPromptModal(discord.ui.Modal, title="Image Edit Instructions"):
         if self.on_select:
             await self.on_select(interaction, self.edit_type, self.prompt.value)
 
-    async def on_error(
+    async def on_error(  # type: ignore[override]
         self, interaction: discord.Interaction, error: Exception
     ) -> None:
         logger.error("modal_error", view="ImageEditPromptModal", error=str(error))
