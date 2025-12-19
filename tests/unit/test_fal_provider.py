@@ -6,11 +6,13 @@ Tests the Fal.AI image generation provider implementation including:
 - Image modification
 - Error handling
 - Model listing
+- Retry behavior (polling only, not submission)
 """
 
 from __future__ import annotations
 
 import base64
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,6 +23,22 @@ from src.core.providers import (
     ImageRequest,
 )
 from src.providers.fal_provider import FalAIError, FalAIProvider
+
+
+def create_mock_handler(result: dict[str, Any]) -> MagicMock:
+    """Create a mock handler that simulates fal_client.submit() return value.
+
+    Args:
+        result: The result dict to return from handler.get()
+
+    Returns:
+        A MagicMock configured to behave like SyncRequestHandle
+    """
+    handler = MagicMock()
+    handler.request_id = "test-request-id-12345"
+    handler.iter_events.return_value = iter([])  # No events, just complete
+    handler.get.return_value = result
+    return handler
 
 
 class TestFalAIProviderInit:
@@ -79,10 +97,12 @@ class TestImageGeneration:
         self, provider: FalAIProvider, mock_fal_response: dict
     ) -> None:
         """Test that generate returns a list of GeneratedImage objects."""
+        mock_handler = create_mock_handler(mock_fal_response)
+
         with patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.return_value = mock_fal_response
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(prompt="A beautiful sunset")
             result = await provider.generate(request)
@@ -99,15 +119,17 @@ class TestImageGeneration:
         self, provider: FalAIProvider, mock_fal_response: dict
     ) -> None:
         """Test that generate passes the prompt to the API."""
+        mock_handler = create_mock_handler(mock_fal_response)
+
         with patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.return_value = mock_fal_response
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(prompt="A cat sitting on a couch")
             await provider.generate(request)
 
-            call_kwargs = mock_subscribe.call_args.kwargs
+            call_kwargs = mock_submit.call_args.kwargs
             assert call_kwargs["arguments"]["prompt"] == "A cat sitting on a couch"
 
     @pytest.mark.asyncio
@@ -115,10 +137,12 @@ class TestImageGeneration:
         self, provider: FalAIProvider, mock_fal_response: dict
     ) -> None:
         """Test that negative prompt is ignored (not supported by nano-banana-pro)."""
+        mock_handler = create_mock_handler(mock_fal_response)
+
         with patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.return_value = mock_fal_response
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(
                 prompt="A landscape",
@@ -126,7 +150,7 @@ class TestImageGeneration:
             )
             await provider.generate(request)
 
-            call_kwargs = mock_subscribe.call_args.kwargs
+            call_kwargs = mock_submit.call_args.kwargs
             # nano-banana-pro does not support negative_prompt
             assert "negative_prompt" not in call_kwargs["arguments"]
 
@@ -142,16 +166,17 @@ class TestImageGeneration:
             ],
             "has_nsfw_concepts": [False, False],
         }
+        mock_handler = create_mock_handler(mock_response)
 
         with patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.return_value = mock_response
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(prompt="Test", num_images=2)
             result = await provider.generate(request)
 
-            call_kwargs = mock_subscribe.call_args.kwargs
+            call_kwargs = mock_submit.call_args.kwargs
             assert call_kwargs["arguments"]["num_images"] == 2
             assert len(result) == 2
 
@@ -160,15 +185,17 @@ class TestImageGeneration:
         self, provider: FalAIProvider, mock_fal_response: dict
     ) -> None:
         """Test that nano-banana-pro uses aspect_ratio instead of image_size."""
+        mock_handler = create_mock_handler(mock_fal_response)
+
         with patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.return_value = mock_fal_response
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(prompt="Test", width=512, height=768)
             await provider.generate(request)
 
-            call_kwargs = mock_subscribe.call_args.kwargs
+            call_kwargs = mock_submit.call_args.kwargs
             # nano-banana-pro uses aspect_ratio instead of image_size
             assert "image_size" not in call_kwargs["arguments"]
             assert call_kwargs["arguments"]["aspect_ratio"] == "1:1"
@@ -180,15 +207,17 @@ class TestImageGeneration:
         self, provider: FalAIProvider, mock_fal_response: dict
     ) -> None:
         """Test that default dimensions are not passed to API."""
+        mock_handler = create_mock_handler(mock_fal_response)
+
         with patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.return_value = mock_fal_response
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(prompt="Test", width=1024, height=1024)
             await provider.generate(request)
 
-            call_kwargs = mock_subscribe.call_args.kwargs
+            call_kwargs = mock_submit.call_args.kwargs
             assert "image_size" not in call_kwargs["arguments"]
 
     @pytest.mark.asyncio
@@ -196,15 +225,17 @@ class TestImageGeneration:
         self, provider: FalAIProvider, mock_fal_response: dict
     ) -> None:
         """Test that guidance_scale is ignored (not supported by nano-banana-pro)."""
+        mock_handler = create_mock_handler(mock_fal_response)
+
         with patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.return_value = mock_fal_response
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(prompt="Test", guidance_scale=7.5)
             await provider.generate(request)
 
-            call_kwargs = mock_subscribe.call_args.kwargs
+            call_kwargs = mock_submit.call_args.kwargs
             # nano-banana-pro does not support guidance_scale
             assert "guidance_scale" not in call_kwargs["arguments"]
 
@@ -213,15 +244,17 @@ class TestImageGeneration:
         self, provider: FalAIProvider, mock_fal_response: dict
     ) -> None:
         """Test that the correct model is used for generation."""
+        mock_handler = create_mock_handler(mock_fal_response)
+
         with patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.return_value = mock_fal_response
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(prompt="Test")
             await provider.generate(request)
 
-            call_kwargs = mock_subscribe.call_args.kwargs
+            call_kwargs = mock_submit.call_args.kwargs
             assert call_kwargs["application"] == "fal-ai/nano-banana-pro"
 
     @pytest.mark.asyncio
@@ -234,11 +267,12 @@ class TestImageGeneration:
                 {"url": "https://fal.ai/images/test.jpg", "width": 1024, "height": 1024}
             ]
         }
+        mock_handler = create_mock_handler(mock_response)
 
         with patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.return_value = mock_response
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(prompt="Test")
             result = await provider.generate(request)
@@ -253,11 +287,12 @@ class TestImageGeneration:
         mock_response = {
             "images": [{"url": "https://fal.ai/test.jpg"}]
         }
+        mock_handler = create_mock_handler(mock_response)
 
         with patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.return_value = mock_response
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(prompt="Test", width=800, height=600)
             result = await provider.generate(request)
@@ -297,14 +332,15 @@ class TestImageModification:
             ],
             "has_nsfw_concepts": [False],
         }
+        mock_handler = create_mock_handler(mock_response)
 
         with patch(
             "src.providers.fal_provider.fal_client.upload"
         ) as mock_upload, patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
             mock_upload.return_value = "https://fal.ai/uploaded.jpg"
-            mock_subscribe.return_value = mock_response
+            mock_submit.return_value = mock_handler
 
             request = ImageModifyRequest(
                 image_data=sample_image_data,
@@ -322,14 +358,15 @@ class TestImageModification:
     ) -> None:
         """Test that modify uploads the source image."""
         mock_response = {"images": [{"url": "https://fal.ai/modified.jpg"}]}
+        mock_handler = create_mock_handler(mock_response)
 
         with patch(
             "src.providers.fal_provider.fal_client.upload"
         ) as mock_upload, patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
             mock_upload.return_value = "https://fal.ai/uploaded.jpg"
-            mock_subscribe.return_value = mock_response
+            mock_submit.return_value = mock_handler
 
             request = ImageModifyRequest(
                 image_data=sample_image_data,
@@ -348,14 +385,15 @@ class TestImageModification:
     ) -> None:
         """Test that modify passes the uploaded image URL in image_urls array."""
         mock_response = {"images": [{"url": "https://fal.ai/modified.jpg"}]}
+        mock_handler = create_mock_handler(mock_response)
 
         with patch(
             "src.providers.fal_provider.fal_client.upload"
         ) as mock_upload, patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
             mock_upload.return_value = "https://fal.ai/uploaded.jpg"
-            mock_subscribe.return_value = mock_response
+            mock_submit.return_value = mock_handler
 
             request = ImageModifyRequest(
                 image_data=sample_image_data,
@@ -363,7 +401,7 @@ class TestImageModification:
             )
             await provider.modify(request)
 
-            call_kwargs = mock_subscribe.call_args.kwargs
+            call_kwargs = mock_submit.call_args.kwargs
             # nano-banana-pro/edit uses image_urls array
             assert call_kwargs["arguments"]["image_urls"] == ["https://fal.ai/uploaded.jpg"]
 
@@ -373,14 +411,15 @@ class TestImageModification:
     ) -> None:
         """Test that modify passes the prompt."""
         mock_response = {"images": [{"url": "https://fal.ai/modified.jpg"}]}
+        mock_handler = create_mock_handler(mock_response)
 
         with patch(
             "src.providers.fal_provider.fal_client.upload"
         ) as mock_upload, patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
             mock_upload.return_value = "https://fal.ai/uploaded.jpg"
-            mock_subscribe.return_value = mock_response
+            mock_submit.return_value = mock_handler
 
             request = ImageModifyRequest(
                 image_data=sample_image_data,
@@ -388,7 +427,7 @@ class TestImageModification:
             )
             await provider.modify(request)
 
-            call_kwargs = mock_subscribe.call_args.kwargs
+            call_kwargs = mock_submit.call_args.kwargs
             assert call_kwargs["arguments"]["prompt"] == "Add a rainbow"
 
     @pytest.mark.asyncio
@@ -397,14 +436,15 @@ class TestImageModification:
     ) -> None:
         """Test that modify ignores guidance_scale (not supported by nano-banana-pro/edit)."""
         mock_response = {"images": [{"url": "https://fal.ai/modified.jpg"}]}
+        mock_handler = create_mock_handler(mock_response)
 
         with patch(
             "src.providers.fal_provider.fal_client.upload"
         ) as mock_upload, patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
             mock_upload.return_value = "https://fal.ai/uploaded.jpg"
-            mock_subscribe.return_value = mock_response
+            mock_submit.return_value = mock_handler
 
             request = ImageModifyRequest(
                 image_data=sample_image_data,
@@ -413,7 +453,7 @@ class TestImageModification:
             )
             await provider.modify(request)
 
-            call_kwargs = mock_subscribe.call_args.kwargs
+            call_kwargs = mock_submit.call_args.kwargs
             # nano-banana-pro/edit does not support guidance_scale
             assert "guidance_scale" not in call_kwargs["arguments"]
 
@@ -423,14 +463,15 @@ class TestImageModification:
     ) -> None:
         """Test that modify uses the correct model."""
         mock_response = {"images": [{"url": "https://fal.ai/modified.jpg"}]}
+        mock_handler = create_mock_handler(mock_response)
 
         with patch(
             "src.providers.fal_provider.fal_client.upload"
         ) as mock_upload, patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
             mock_upload.return_value = "https://fal.ai/uploaded.jpg"
-            mock_subscribe.return_value = mock_response
+            mock_submit.return_value = mock_handler
 
             request = ImageModifyRequest(
                 image_data=sample_image_data,
@@ -438,7 +479,7 @@ class TestImageModification:
             )
             await provider.modify(request)
 
-            call_kwargs = mock_subscribe.call_args.kwargs
+            call_kwargs = mock_submit.call_args.kwargs
             assert call_kwargs["application"] == "fal-ai/nano-banana-pro/edit"
 
     @pytest.mark.asyncio
@@ -473,18 +514,18 @@ class TestErrorHandling:
     async def test_generate_api_error_raises_fal_error(
         self, provider: FalAIProvider
     ) -> None:
-        """Test that API errors are wrapped in FalAIError."""
+        """Test that API errors during submission are wrapped in FalAIError."""
         with patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.side_effect = Exception("API connection failed")
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.side_effect = Exception("API connection failed")
 
             request = ImageRequest(prompt="Test")
 
             with pytest.raises(FalAIError) as exc_info:
                 await provider.generate(request)
 
-            assert "Image generation failed" in str(exc_info.value)
+            assert "Failed to submit image generation" in str(exc_info.value)
             assert "API connection failed" in str(exc_info.value)
 
     @pytest.mark.asyncio
@@ -511,30 +552,34 @@ class TestErrorHandling:
     async def test_modify_api_error_raises_fal_error(
         self, provider: FalAIProvider
     ) -> None:
-        """Test that modification API errors are wrapped in FalAIError."""
+        """Test that modification API errors during submission are wrapped in FalAIError."""
         image_data = base64.b64encode(b"test").decode("utf-8")
 
         with patch(
             "src.providers.fal_provider.fal_client.upload"
         ) as mock_upload, patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
             mock_upload.return_value = "https://fal.ai/uploaded.jpg"
-            mock_subscribe.side_effect = Exception("Modification failed")
+            mock_submit.side_effect = Exception("Modification failed")
 
             request = ImageModifyRequest(image_data=image_data, prompt="Test")
 
             with pytest.raises(FalAIError) as exc_info:
                 await provider.modify(request)
 
-            assert "Image modification failed" in str(exc_info.value)
+            assert "Failed to submit image modification" in str(exc_info.value)
 
 
 class TestRetryBehavior:
     """Tests for retry logic with exponential backoff.
 
+    IMPORTANT: Retry logic only applies to POLLING, not to job submission.
+    This prevents double-charging when errors occur after job submission.
+
     Tests that:
-    - Transient errors (network, rate limit, 503) trigger retries
+    - Submission errors are NOT retried (to prevent double-charging)
+    - Polling errors (network, rate limit, 503) trigger retries
     - Permanent errors (401, 400) fail immediately without retries
     - Correct number of retries occur before final failure
     """
@@ -545,23 +590,51 @@ class TestRetryBehavior:
         return FalAIProvider(api_key="test-key", max_retries=3, base_delay=0.1)
 
     @pytest.mark.asyncio
-    async def test_retries_on_network_error(
+    async def test_no_retry_on_submit_error(
         self, provider: FalAIProvider
     ) -> None:
-        """Test that network errors trigger retries."""
+        """Test that submission errors are NOT retried (prevents double-charging)."""
         with patch("asyncio.sleep") as mock_sleep, patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.side_effect = Exception("Network error: connection reset")
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.side_effect = Exception("Network error: connection reset")
 
             request = ImageRequest(prompt="Test")
 
             with pytest.raises(FalAIError) as exc_info:
                 await provider.generate(request)
 
-            # Should have retried 3 times (4 total attempts)
-            assert mock_subscribe.call_count == 4
-            # Sleep should have been called 3 times (between retries)
+            # Submit should only be called ONCE - no retries for submit
+            assert mock_submit.call_count == 1
+            # No sleep because no retries happened
+            assert mock_sleep.call_count == 0
+            assert "Failed to submit" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_retries_on_polling_network_error(
+        self, provider: FalAIProvider
+    ) -> None:
+        """Test that network errors during polling trigger retries."""
+        mock_handler = MagicMock()
+        mock_handler.request_id = "test-id"
+        # iter_events fails with network error
+        mock_handler.iter_events.side_effect = Exception("Network error: connection reset")
+
+        with patch("asyncio.sleep") as mock_sleep, patch(
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
+
+            request = ImageRequest(prompt="Test")
+
+            with pytest.raises(FalAIError) as exc_info:
+                await provider.generate(request)
+
+            # Submit called once (not retried)
+            assert mock_submit.call_count == 1
+            # iter_events retried 4 times (1 initial + 3 retries)
+            assert mock_handler.iter_events.call_count == 4
+            # Sleep called 3 times between retries
             assert mock_sleep.call_count == 3
             assert "after 4 attempts" in str(exc_info.value)
 
@@ -569,49 +642,63 @@ class TestRetryBehavior:
     async def test_retries_on_rate_limit_error(
         self, provider: FalAIProvider
     ) -> None:
-        """Test that rate limit errors (429) trigger retries."""
+        """Test that rate limit errors (429) during polling trigger retries."""
+        mock_handler = MagicMock()
+        mock_handler.request_id = "test-id"
+        mock_handler.iter_events.side_effect = Exception("HTTP 429: rate limit exceeded")
+
         with patch("asyncio.sleep") as mock_sleep, patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.side_effect = Exception("HTTP 429: rate limit exceeded")
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(prompt="Test")
 
             with pytest.raises(FalAIError):
                 await provider.generate(request)
 
-            # Should have retried 3 times (4 total attempts)
-            assert mock_subscribe.call_count == 4
+            # Submit called once, polling retried
+            assert mock_submit.call_count == 1
+            assert mock_handler.iter_events.call_count == 4
             assert mock_sleep.call_count == 3
 
     @pytest.mark.asyncio
     async def test_retries_on_service_unavailable(
         self, provider: FalAIProvider
     ) -> None:
-        """Test that 503 errors trigger retries."""
+        """Test that 503 errors during polling trigger retries."""
+        mock_handler = MagicMock()
+        mock_handler.request_id = "test-id"
+        mock_handler.iter_events.side_effect = Exception("HTTP 503: service unavailable")
+
         with patch("asyncio.sleep") as mock_sleep, patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.side_effect = Exception("HTTP 503: service unavailable")
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(prompt="Test")
 
             with pytest.raises(FalAIError):
                 await provider.generate(request)
 
-            # Should have retried 3 times (4 total attempts)
-            assert mock_subscribe.call_count == 4
+            # Submit called once, polling retried
+            assert mock_submit.call_count == 1
+            assert mock_handler.iter_events.call_count == 4
             assert mock_sleep.call_count == 3
 
     @pytest.mark.asyncio
     async def test_no_retry_on_auth_error(
         self, provider: FalAIProvider
     ) -> None:
-        """Test that authentication errors (401) fail immediately without retries."""
+        """Test that authentication errors (401) during polling fail immediately."""
+        mock_handler = MagicMock()
+        mock_handler.request_id = "test-id"
+        mock_handler.iter_events.side_effect = Exception("HTTP 401: unauthorized")
+
         with patch("asyncio.sleep") as mock_sleep, patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.side_effect = Exception("HTTP 401: unauthorized")
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(prompt="Test")
 
@@ -619,7 +706,8 @@ class TestRetryBehavior:
                 await provider.generate(request)
 
             # Should fail immediately without retries
-            assert mock_subscribe.call_count == 1
+            assert mock_submit.call_count == 1
+            assert mock_handler.iter_events.call_count == 1
             assert mock_sleep.call_count == 0
             # Should NOT say "after X attempts"
             assert "after" not in str(exc_info.value).lower() or "attempts" not in str(exc_info.value).lower()
@@ -628,11 +716,15 @@ class TestRetryBehavior:
     async def test_no_retry_on_bad_request(
         self, provider: FalAIProvider
     ) -> None:
-        """Test that bad request errors (400) fail immediately without retries."""
+        """Test that bad request errors (400) during polling fail immediately."""
+        mock_handler = MagicMock()
+        mock_handler.request_id = "test-id"
+        mock_handler.iter_events.side_effect = Exception("HTTP 400: bad request")
+
         with patch("asyncio.sleep") as mock_sleep, patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.side_effect = Exception("HTTP 400: bad request")
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(prompt="Test")
 
@@ -640,18 +732,23 @@ class TestRetryBehavior:
                 await provider.generate(request)
 
             # Should fail immediately without retries
-            assert mock_subscribe.call_count == 1
+            assert mock_submit.call_count == 1
+            assert mock_handler.iter_events.call_count == 1
             assert mock_sleep.call_count == 0
 
     @pytest.mark.asyncio
     async def test_no_retry_on_forbidden(
         self, provider: FalAIProvider
     ) -> None:
-        """Test that forbidden errors (403) fail immediately without retries."""
+        """Test that forbidden errors (403) during polling fail immediately."""
+        mock_handler = MagicMock()
+        mock_handler.request_id = "test-id"
+        mock_handler.iter_events.side_effect = Exception("HTTP 403: forbidden")
+
         with patch("asyncio.sleep") as mock_sleep, patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            mock_subscribe.side_effect = Exception("HTTP 403: forbidden")
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(prompt="Test")
 
@@ -659,7 +756,8 @@ class TestRetryBehavior:
                 await provider.generate(request)
 
             # Should fail immediately without retries
-            assert mock_subscribe.call_count == 1
+            assert mock_submit.call_count == 1
+            assert mock_handler.iter_events.call_count == 1
             assert mock_sleep.call_count == 0
 
     @pytest.mark.asyncio
@@ -667,11 +765,15 @@ class TestRetryBehavior:
         self, provider: FalAIProvider
     ) -> None:
         """Test that retry delays follow exponential backoff pattern."""
+        mock_handler = MagicMock()
+        mock_handler.request_id = "test-id"
+        # Use "connection" to trigger NETWORK classification (retryable)
+        mock_handler.iter_events.side_effect = Exception("connection error")
+
         with patch("asyncio.sleep") as mock_sleep, patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            # Use "connection" to trigger NETWORK classification (retryable)
-            mock_subscribe.side_effect = Exception("connection error")
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(prompt="Test")
 
@@ -690,27 +792,34 @@ class TestRetryBehavior:
     async def test_success_after_transient_failures(
         self, provider: FalAIProvider
     ) -> None:
-        """Test that operation succeeds if it recovers before max retries."""
+        """Test that polling succeeds if it recovers before max retries."""
         mock_response = {
             "images": [{"url": "https://fal.ai/success.jpg", "width": 1024, "height": 1024}],
             "has_nsfw_concepts": [False],
         }
 
+        mock_handler = MagicMock()
+        mock_handler.request_id = "test-id"
+        # Fail twice with network error (retryable), then succeed
+        mock_handler.iter_events.side_effect = [
+            Exception("connection reset"),
+            Exception("connection reset"),
+            iter([]),  # Success - no events
+        ]
+        mock_handler.get.return_value = mock_response
+
         with patch("asyncio.sleep") as mock_sleep, patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
-            # Fail twice with network error (retryable), then succeed
-            mock_subscribe.side_effect = [
-                Exception("connection reset"),
-                Exception("connection reset"),
-                mock_response,
-            ]
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
+            mock_submit.return_value = mock_handler
 
             request = ImageRequest(prompt="Test")
             result = await provider.generate(request)
 
-            # Should have made 3 calls (2 failures + 1 success)
-            assert mock_subscribe.call_count == 3
+            # Submit called once (not retried)
+            assert mock_submit.call_count == 1
+            # iter_events called 3 times (2 failures + 1 success)
+            assert mock_handler.iter_events.call_count == 3
             # Should have slept twice (between failures)
             assert mock_sleep.call_count == 2
             # Should return successful result
@@ -721,26 +830,32 @@ class TestRetryBehavior:
     async def test_retry_on_modify_operation(
         self, provider: FalAIProvider
     ) -> None:
-        """Test that retry logic also works for modify operations."""
+        """Test that polling retry logic also works for modify operations."""
         import base64
         image_data = base64.b64encode(b"test").decode("utf-8")
+
+        mock_handler = MagicMock()
+        mock_handler.request_id = "test-id"
+        # Use "connection" to trigger NETWORK classification (retryable)
+        mock_handler.iter_events.side_effect = Exception("connection error")
 
         with patch("asyncio.sleep") as mock_sleep, patch(
             "src.providers.fal_provider.fal_client.upload"
         ) as mock_upload, patch(
-            "src.providers.fal_provider.fal_client.subscribe"
-        ) as mock_subscribe:
+            "src.providers.fal_provider.fal_client.submit"
+        ) as mock_submit:
             mock_upload.return_value = "https://fal.ai/uploaded.jpg"
-            # Use "connection" to trigger NETWORK classification (retryable)
-            mock_subscribe.side_effect = Exception("connection error")
+            mock_submit.return_value = mock_handler
 
             request = ImageModifyRequest(image_data=image_data, prompt="Test")
 
             with pytest.raises(FalAIError):
                 await provider.modify(request)
 
-            # Should have retried 3 times (4 total attempts for subscribe)
-            assert mock_subscribe.call_count == 4
+            # Submit called once (not retried to prevent double-charging)
+            assert mock_submit.call_count == 1
+            # Polling retried 4 times (1 initial + 3 retries)
+            assert mock_handler.iter_events.call_count == 4
             assert mock_sleep.call_count == 3
 
 

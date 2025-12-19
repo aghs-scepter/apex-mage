@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-from collections.abc import Callable
 from typing import Any
 
 import fal_client
@@ -143,23 +142,22 @@ class FalAIProvider:
         """
         logger.debug("Fal.AI queue update: still waiting...")
 
-    async def _call_with_retry(
+    async def _poll_with_retry(
         self,
-        sync_func: Callable[[], Any],
+        handler: Any,
         operation_name: str,
     ) -> Any:
-        """Execute a synchronous function with retry logic for transient errors.
+        """Poll for job result with retry logic. Safe because polling is idempotent.
 
-        This method wraps synchronous fal_client calls with exponential backoff
-        retry logic for transient errors (network issues, rate limits, server
-        overload, etc.).
+        This method only retries the polling phase, NOT the job submission.
+        This prevents double-charging when errors occur during result retrieval.
 
         Args:
-            sync_func: A callable that performs the synchronous API operation.
+            handler: The SyncRequestHandle from fal_client.submit().
             operation_name: Human-readable name for logging (e.g., "image generation").
 
         Returns:
-            The result of the sync_func call.
+            The result of the job.
 
         Raises:
             FalAIError: If all retries are exhausted or a permanent error occurs.
@@ -168,14 +166,20 @@ class FalAIProvider:
 
         for attempt in range(self._max_retries + 1):
             try:
-                return await asyncio.to_thread(sync_func)
+                # Poll for status updates, then get final result
+                def get_result() -> Any:
+                    for event in handler.iter_events(with_logs=True):
+                        self._on_queue_update(event)
+                    return handler.get()
+
+                return await asyncio.to_thread(get_result)
             except Exception as ex:
                 last_error = ex
                 category = classify_error(ex)
 
                 if not is_retryable(category):
                     logger.error(
-                        "Fal.AI %s failed with permanent error: %s",
+                        "Fal.AI %s polling failed with permanent error: %s",
                         operation_name,
                         ex,
                     )
@@ -185,7 +189,7 @@ class FalAIProvider:
 
                 if attempt >= self._max_retries:
                     logger.error(
-                        "Fal.AI %s failed after %d attempts: %s",
+                        "Fal.AI %s polling failed after %d attempts: %s",
                         operation_name,
                         attempt + 1,
                         ex,
@@ -198,7 +202,7 @@ class FalAIProvider:
                 # Calculate delay with exponential backoff
                 delay = self._base_delay * (2.0 ** attempt)
                 logger.warning(
-                    "Fal.AI %s failed (attempt %d/%d), retrying in %.1fs: %s",
+                    "Fal.AI %s polling failed (attempt %d/%d), retrying in %.1fs: %s",
                     operation_name,
                     attempt + 1,
                     self._max_retries + 1,
@@ -212,7 +216,7 @@ class FalAIProvider:
             raise FalAIError(
                 f"{operation_name.capitalize()} failed: {last_error}"
             ) from last_error
-        raise RuntimeError("Unexpected state in _call_with_retry")
+        raise RuntimeError("Unexpected state in _poll_with_retry")
 
     async def generate(
         self,
@@ -249,16 +253,25 @@ class FalAIProvider:
         if request.num_images > 1:
             arguments["num_images"] = request.num_images
 
-        def subscribe() -> dict[str, Any]:
-            return fal_client.subscribe(
-                application=self._create_model,
-                arguments=arguments,
-                with_logs=True,
-                on_queue_update=self._on_queue_update,
-            )
+        # Step 1: Submit job ONCE (no retry - this is billable)
+        # If submission fails, it's safe for caller to retry since no job was created
+        try:
+            def do_submit() -> Any:
+                return fal_client.submit(
+                    application=self._create_model,
+                    arguments=arguments,
+                )
 
-        # Call with retry logic for transient errors
-        result = await self._call_with_retry(subscribe, "image generation")
+            handler = await asyncio.to_thread(do_submit)
+            logger.debug(
+                "Job submitted with request_id: %s", handler.request_id
+            )
+        except Exception as ex:
+            logger.error("Failed to submit image generation job: %s", ex)
+            raise FalAIError(f"Failed to submit image generation: {ex}") from ex
+
+        # Step 2: Poll for result WITH retry (idempotent, safe to retry)
+        result = await self._poll_with_retry(handler, "image generation")
         logger.debug("Image generation completed. API response: %s", result)
 
         # Convert response to GeneratedImage list
@@ -330,16 +343,26 @@ class FalAIProvider:
             "enable_web_search": True,
         }
 
-        def subscribe() -> dict[str, Any]:
-            return fal_client.subscribe(
-                application=self._modify_model,
-                arguments=arguments,
-                with_logs=True,
-                on_queue_update=self._on_queue_update,
-            )
+        # Step 1: Submit job ONCE (no retry - this is billable)
+        # If submission fails, it's safe for caller to retry since no job was created
+        try:
+            def do_submit() -> Any:
+                return fal_client.submit(
+                    application=self._modify_model,
+                    arguments=arguments,
+                )
 
-        # Call with retry logic for transient errors
-        result = await self._call_with_retry(subscribe, "image modification")
+            handler = await asyncio.to_thread(do_submit)
+            logger.debug(
+                "Modification job submitted with request_id: %s",
+                handler.request_id,
+            )
+        except Exception as ex:
+            logger.error("Failed to submit image modification job: %s", ex)
+            raise FalAIError(f"Failed to submit image modification: {ex}") from ex
+
+        # Step 2: Poll for result WITH retry (idempotent, safe to retry)
+        result = await self._poll_with_retry(handler, "image modification")
         logger.debug("Image modification completed.")
 
         # Convert response to GeneratedImage list
