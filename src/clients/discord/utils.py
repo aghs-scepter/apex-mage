@@ -54,7 +54,7 @@ async def handle_text_overflow(
     return text, None
 
 
-def create_embed_user(interaction: discord.Interaction) -> dict:
+def create_embed_user(interaction: discord.Interaction) -> dict[str, object]:
     """Create user slug for embed decoration.
 
     Args:

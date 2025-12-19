@@ -10,7 +10,7 @@ import discord
 
 from src.core.image_utils import compress_image, image_strip_headers
 from src.core.logging import get_logger
-from src.core.providers import ImageRequest
+from src.core.providers import ImageModifyRequest
 
 if TYPE_CHECKING:
     from src.adapters.repository_compat import RepositoryAdapter
@@ -205,6 +205,7 @@ class ClearHistoryConfirmationView(discord.ui.View):
         self.message = await interaction.followup.send(
             embed=self.embed,
             view=self,
+            wait=True,
         )
 
     def disable_buttons(self) -> None:
@@ -747,7 +748,7 @@ class ImageEditPromptModal(discord.ui.Modal, title="Image Edit Instructions"):
         self.message = message
         self.on_select = on_select
 
-        self.prompt = discord.ui.TextInput(
+        self.prompt: discord.ui.TextInput[ImageEditPromptModal] = discord.ui.TextInput(
             label="Enter your prompt:",
             style=discord.TextStyle.paragraph,
             placeholder=(
@@ -869,7 +870,7 @@ class ImageEditPerformView(discord.ui.View):
                 raise RuntimeError("Image provider not initialized")
 
             modified_images = await self.image_provider.modify(
-                ImageRequest(
+                ImageModifyRequest(
                     prompt=prompt,
                     image_data=self.image_data["image"],
                     guidance_scale=guidance_scale,
@@ -878,6 +879,8 @@ class ImageEditPerformView(discord.ui.View):
             modified_image = modified_images[0]
 
             # Process the response
+            if modified_image.url is None:
+                raise ValueError("Modified image has no URL")
             result_image_data = image_strip_headers(modified_image.url, "jpeg")
             result_image_data = await asyncio.to_thread(compress_image, result_image_data)
             image_return = {"filename": "image.jpeg", "image": result_image_data}

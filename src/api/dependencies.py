@@ -85,6 +85,10 @@ class AppState:
         logger.info("repository_initialized", db_path=db_path)
 
         # Initialize AI providers
+        if not anthropic_api_key:
+            raise RuntimeError("Anthropic API key is required")
+        if not fal_api_key:
+            raise RuntimeError("Fal.AI API key is required")
         self._ai_provider = AnthropicProvider(api_key=anthropic_api_key)
         self._image_provider = FalAIProvider(api_key=fal_api_key)
         logger.info("ai_providers_initialized", providers=["anthropic", "fal"])

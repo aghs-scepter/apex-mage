@@ -56,4 +56,4 @@ def count_command(func: CommandHandler[T]) -> CommandHandler[T]:
         finally:
             clear_contextvars()
 
-    return wrapper  # type: ignore[return-value]
+    return wrapper

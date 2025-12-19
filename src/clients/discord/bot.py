@@ -109,8 +109,14 @@ class DiscordBot(discord.Client):
         logger.info("repository_initialized", db_path="data/app.db")
 
         # Initialize AI providers
-        self._ai_provider = AnthropicProvider(api_key=getenv("ANTHROPIC_API_KEY"))
-        self._image_provider = FalAIProvider(api_key=getenv("FAL_KEY"))
+        anthropic_key = getenv("ANTHROPIC_API_KEY")
+        fal_key = getenv("FAL_KEY")
+        if not anthropic_key:
+            raise RuntimeError("ANTHROPIC_API_KEY environment variable is required")
+        if not fal_key:
+            raise RuntimeError("FAL_KEY environment variable is required")
+        self._ai_provider = AnthropicProvider(api_key=anthropic_key)
+        self._image_provider = FalAIProvider(api_key=fal_key)
         logger.info("ai_providers_initialized", providers=["anthropic", "fal"])
 
         # Initialize GCS adapter for cloud storage uploads

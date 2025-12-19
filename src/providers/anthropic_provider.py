@@ -10,7 +10,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 
-from anthropic import APIError, AsyncAnthropic
+from anthropic import APIStatusError, AsyncAnthropic
 
 from src.core.providers import AIProvider, ChatMessage, ChatResponse
 
@@ -115,20 +115,23 @@ class AnthropicProvider:
 
         for retry in range(self._max_retries):
             try:
-                # Build kwargs for the API call
-                kwargs: dict = {
-                    "model": self._default_model,
-                    "max_tokens": max_tokens,
-                    "messages": anthropic_messages,
-                }
                 if system_prompt:
-                    kwargs["system"] = system_prompt
-
-                response = await self._client.messages.create(**kwargs)
+                    response = await self._client.messages.create(
+                        model=self._default_model,
+                        max_tokens=max_tokens,
+                        messages=anthropic_messages,  # type: ignore[arg-type]
+                        system=system_prompt,
+                    )
+                else:
+                    response = await self._client.messages.create(
+                        model=self._default_model,
+                        max_tokens=max_tokens,
+                        messages=anthropic_messages,  # type: ignore[arg-type]
+                    )
 
                 # Extract content - Anthropic returns a list of content blocks
                 content = ""
-                if response.content:
+                if response.content and hasattr(response.content[0], "text"):
                     content = response.content[0].text
 
                 return ChatResponse(
@@ -140,7 +143,7 @@ class AnthropicProvider:
                     },
                 )
 
-            except APIError as ex:
+            except APIStatusError as ex:
                 # Anthropic throws 529 when servers are overloaded
                 if ex.status_code == 529:
                     sleep_time = self._backoff_factor**retry
@@ -155,11 +158,7 @@ class AnthropicProvider:
                     raise
 
         # All retries exhausted
-        raise APIError(
-            message="Max retries exceeded for Anthropic API call",
-            request=None,  # type: ignore[arg-type]
-            body=None,
-        )
+        raise RuntimeError("Max retries exceeded for Anthropic API call")
 
     async def chat_stream(
         self,
@@ -186,16 +185,20 @@ class AnthropicProvider:
         """
         anthropic_messages = self._convert_messages(messages)
 
-        # Build kwargs for the API call
-        kwargs: dict = {
-            "model": self._default_model,
-            "max_tokens": 4096,
-            "messages": anthropic_messages,
-        }
         if system_prompt:
-            kwargs["system"] = system_prompt
-
-        async with self._client.messages.stream(**kwargs) as stream:
+            stream_context = self._client.messages.stream(
+                model=self._default_model,
+                max_tokens=4096,
+                messages=anthropic_messages,  # type: ignore[arg-type]
+                system=system_prompt,
+            )
+        else:
+            stream_context = self._client.messages.stream(
+                model=self._default_model,
+                max_tokens=4096,
+                messages=anthropic_messages,  # type: ignore[arg-type]
+            )
+        async with stream_context as stream:
             async for text in stream.text_stream:
                 yield text
 

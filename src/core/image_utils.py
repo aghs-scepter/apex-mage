@@ -7,9 +7,11 @@ base64 header stripping, image compression, and response formatting.
 import base64
 import binascii
 import io
+from typing import cast
 from uuid import uuid4
 
 from PIL import Image
+from PIL.Image import Image as PILImage
 
 
 def image_strip_headers(image_data: str, file_extension: str) -> str:
@@ -61,7 +63,7 @@ def compress_image(
             padded += "="
         image_data = base64.b64decode(padded)
 
-    img = Image.open(io.BytesIO(image_data))
+    img: PILImage = Image.open(io.BytesIO(image_data))
 
     # Convert RGBA or P modes to RGB if necessary
     if img.mode in ("RGBA", "P"):
@@ -70,7 +72,7 @@ def compress_image(
     # Calculate new dimensions while maintaining aspect ratio
     # Cap ratio at 1.0 to prevent upscaling small images
     ratio = min(max_size[0] / img.size[0], max_size[1] / img.size[1], 1.0)
-    new_size = tuple(int(x * ratio) for x in img.size)
+    new_size = cast(tuple[int, int], tuple(int(x * ratio) for x in img.size))
 
     # Resize and compress the image
     img = img.resize(new_size, Image.Resampling.LANCZOS)

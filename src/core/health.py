@@ -184,7 +184,7 @@ class HealthChecker:
 
         checks: list[ServiceCheck] = []
         for name, result in zip(self._checks.keys(), results, strict=True):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 checks.append(
                     ServiceCheck(
                         name=name,

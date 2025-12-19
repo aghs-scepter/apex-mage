@@ -4,7 +4,7 @@ import asyncio
 import base64
 import json
 from os import getenv
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -41,7 +41,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
         bot: The Discord bot instance.
     """
 
-    @bot.tree.command()
+    @bot.tree.command()  # type: ignore[arg-type]
     @app_commands.describe(image="Image file to upload to the bot")
     @count_command
     async def upload_image(
@@ -112,7 +112,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
             )
             await error_view.initialize(interaction)
 
-    @bot.tree.command()
+    @bot.tree.command()  # type: ignore[arg-type]
     @app_commands.describe(prompt="Description of the image you want to generate")
     @count_command
     async def create_image(
@@ -169,6 +169,8 @@ def register_image_commands(bot: "DiscordBot") -> None:
                         ImageRequest(prompt=prompt)
                     )
                     generated_image = generated_images[0]
+                    if generated_image.url is None:
+                        raise ValueError("Generated image has no URL")
                     image_data = image_strip_headers(generated_image.url, "jpeg")
                     image_data = await asyncio.to_thread(compress_image, image_data)
                     str_image = json.dumps(
@@ -279,7 +281,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
             )
             await error_view.initialize(interaction)
 
-    @bot.tree.command()
+    @bot.tree.command()  # type: ignore[arg-type]
     @app_commands.describe()
     @count_command
     async def modify_image(
@@ -302,17 +304,16 @@ def register_image_commands(bot: "DiscordBot") -> None:
         embed_user = create_embed_user(interaction)
 
         async def on_edit_complete(
-            edit_interaction: discord.Interaction, result_data: dict
+            edit_interaction: discord.Interaction, result_data: dict[str, Any]
         ) -> None:
             """Handle image edit completion."""
             if result_data.get("error"):
+                error_msg = result_data.get("message")
                 error_view = InfoEmbedView(
                     message=interaction.message,
                     user=embed_user,
                     title="Image edit error!",
-                    description=result_data.get(
-                        "message", "An error occurred during image editing."
-                    ),
+                    description=str(error_msg) if error_msg else "An error occurred during image editing.",
                     is_error=True,
                     image_data=None,
                 )
@@ -332,13 +333,18 @@ def register_image_commands(bot: "DiscordBot") -> None:
                     "Your image was modified successfully. "
                     "You can use it for future `/prompt` and `/modify_image` commands."
                 )
+                # result_data contains filename and image keys when successful
+                image_data_typed: dict[str, str] = {
+                    "filename": str(result_data.get("filename", "")),
+                    "image": str(result_data.get("image", "")),
+                }
                 success_view = InfoEmbedView(
                     message=interaction.message,
                     user=embed_user,
                     title="Image modified",
                     description=success_message,
                     is_error=False,
-                    image_data=result_data,
+                    image_data=image_data_typed,
                 )
                 await success_view.initialize(edit_interaction)
 
@@ -373,6 +379,8 @@ def register_image_commands(bot: "DiscordBot") -> None:
             )
             await processing_view.initialize(edit_interaction)
 
+            if edit_interaction.message is None or selected_image is None:
+                raise RuntimeError("Message or selected_image is None")
             perform_view = ImageEditPerformView(
                 interaction=edit_interaction,
                 message=edit_interaction.message,
@@ -386,10 +394,10 @@ def register_image_commands(bot: "DiscordBot") -> None:
             )
             await perform_view.initialize(edit_interaction)
 
-        selected_image: dict | None = None
+        selected_image: dict[str, str] | None = None
 
         async def on_image_selected(
-            img_interaction: discord.Interaction, image_data: dict | None
+            img_interaction: discord.Interaction, image_data: dict[str, str] | None
         ) -> None:
             """Handle image selection from carousel."""
             nonlocal selected_image

@@ -13,7 +13,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from anthropic import APIError
+from anthropic import APIStatusError
 
 from src.core.providers import ChatMessage, ChatResponse
 from src.providers.anthropic_provider import AnthropicProvider
@@ -268,12 +268,13 @@ class TestErrorHandling:
             mock_response.usage.input_tokens = 10
             mock_response.usage.output_tokens = 20
 
-            error_529 = APIError(
+            mock_response_529 = MagicMock()
+            mock_response_529.status_code = 529
+            error_529 = APIStatusError(
                 message="Overloaded",
-                request=MagicMock(),
+                response=mock_response_529,
                 body=None,
             )
-            error_529.status_code = 529
 
             mock_client = MagicMock()
             mock_client.messages.create = AsyncMock(
@@ -303,12 +304,13 @@ class TestErrorHandling:
             mock_response.usage.input_tokens = 10
             mock_response.usage.output_tokens = 20
 
-            error_529 = APIError(
+            mock_response_529 = MagicMock()
+            mock_response_529.status_code = 529
+            error_529 = APIStatusError(
                 message="Overloaded",
-                request=MagicMock(),
+                response=mock_response_529,
                 body=None,
             )
-            error_529.status_code = 529
 
             # Fail 3 times, then succeed
             mock_client = MagicMock()
@@ -332,12 +334,13 @@ class TestErrorHandling:
         with patch(
             "src.providers.anthropic_provider.AsyncAnthropic"
         ) as mock_class:
-            error_529 = APIError(
+            mock_response_529 = MagicMock()
+            mock_response_529.status_code = 529
+            error_529 = APIStatusError(
                 message="Overloaded",
-                request=MagicMock(),
+                response=mock_response_529,
                 body=None,
             )
-            error_529.status_code = 529
 
             mock_client = MagicMock()
             # Always fail with 529
@@ -349,7 +352,7 @@ class TestErrorHandling:
                     api_key="test-key", max_retries=3
                 )
 
-                with pytest.raises(APIError) as exc_info:
+                with pytest.raises(RuntimeError) as exc_info:
                     await provider.chat(
                         [ChatMessage(role="user", content="Hello")]
                     )
@@ -362,12 +365,13 @@ class TestErrorHandling:
         with patch(
             "src.providers.anthropic_provider.AsyncAnthropic"
         ) as mock_class:
-            error_400 = APIError(
+            mock_response_400 = MagicMock()
+            mock_response_400.status_code = 400
+            error_400 = APIStatusError(
                 message="Bad request",
-                request=MagicMock(),
+                response=mock_response_400,
                 body=None,
             )
-            error_400.status_code = 400
 
             mock_client = MagicMock()
             mock_client.messages.create = AsyncMock(side_effect=error_400)
@@ -376,7 +380,7 @@ class TestErrorHandling:
             with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
                 provider = AnthropicProvider(api_key="test-key")
 
-                with pytest.raises(APIError) as exc_info:
+                with pytest.raises(APIStatusError) as exc_info:
                     await provider.chat(
                         [ChatMessage(role="user", content="Hello")]
                     )

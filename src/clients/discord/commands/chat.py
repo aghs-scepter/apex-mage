@@ -74,7 +74,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
         bot: The Discord bot instance.
     """
 
-    @bot.tree.command()
+    @bot.tree.command()  # type: ignore[arg-type]
     @app_commands.describe()
     @count_command
     async def help(interaction: discord.Interaction) -> None:
@@ -110,7 +110,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
         )
         await help_view.initialize(interaction)
 
-    @bot.tree.command()
+    @bot.tree.command()  # type: ignore[arg-type]
     @app_commands.describe(prompt="Prompt for the AI to respond to")
     @count_command
     async def prompt(
@@ -197,7 +197,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                         is_error=False,
                         image_data=(
                             {"filename": upload.filename, "image": images[0]["image"]}
-                            if images
+                            if images and upload
                             else None
                         ),
                         notes=processing_notes,
@@ -239,7 +239,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                         is_error=False,
                         image_data=(
                             {"filename": upload.filename, "image": images[0]["image"]}
-                            if images
+                            if images and upload
                             else None
                         ),
                         notes=info_notes,
@@ -301,7 +301,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
             )
             await error_view.initialize(interaction)
 
-    @bot.tree.command()
+    @bot.tree.command()  # type: ignore[arg-type]
     @app_commands.describe(prompt="Description of the personality of the AI")
     @count_command
     async def behavior(
@@ -414,7 +414,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
             )
             await error_view.initialize(interaction)
 
-    @bot.tree.command()
+    @bot.tree.command()  # type: ignore[arg-type]
     @app_commands.describe()
     @count_command
     async def clear(
@@ -438,11 +438,11 @@ def register_chat_commands(bot: "DiscordBot") -> None:
 
         async def on_clear_selection(
             clear_interaction: discord.Interaction,
-            user: dict,
+            user: dict[str, Any] | None,
             confirmed: bool,
         ) -> None:
             if confirmed:
-                await bot.repo.deactivate_all_messages(channel_id)
+                await bot.repo.clear_messages(channel_id, "All Models")
                 success_message = (
                     "The bot's memory for this channel has been cleared. "
                     "All prior messages and images have been forgotten."
