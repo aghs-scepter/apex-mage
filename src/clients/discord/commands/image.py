@@ -53,6 +53,8 @@ def register_image_commands(bot: "DiscordBot") -> None:
             interaction: The Discord interaction.
             image: The image attachment to upload.
         """
+        assert interaction.channel_id is not None, "Command must be used in a channel"
+        channel_id = interaction.channel_id
         await interaction.response.defer()
 
         embed_user = create_embed_user(interaction)
@@ -72,9 +74,9 @@ def register_image_commands(bot: "DiscordBot") -> None:
             await image.to_file()
             str_images = json.dumps(images)
 
-            await bot.repo.create_channel(interaction.channel_id)
+            await bot.repo.create_channel(channel_id)
             await bot.repo.add_message_with_images(
-                interaction.channel_id,
+                channel_id,
                 "Anthropic",
                 "prompt",
                 False,
@@ -125,6 +127,8 @@ def register_image_commands(bot: "DiscordBot") -> None:
             prompt: Description of the image to generate.
             timeout: The timeout for the request in seconds.
         """
+        assert interaction.channel_id is not None, "Command must be used in a channel"
+        channel_id = interaction.channel_id
         await interaction.response.defer()
 
         if timeout is None:
@@ -138,12 +142,12 @@ def register_image_commands(bot: "DiscordBot") -> None:
 
                 if rate_check.allowed:
                     display_prompt, full_prompt_url = await handle_text_overflow(
-                        bot, "prompt", prompt, interaction.channel_id
+                        bot, "prompt", prompt, channel_id
                     )
 
-                    await bot.repo.create_channel(interaction.channel_id)
+                    await bot.repo.create_channel(channel_id)
                     await bot.repo.add_message(
-                        interaction.channel_id, "Fal.AI", "prompt", True, prompt
+                        channel_id, "Fal.AI", "prompt", True, prompt
                     )
 
                     processing_message = (
@@ -171,7 +175,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
                         [{"filename": "image.jpeg", "image": image_data}]
                     )
                     await bot.repo.add_message_with_images(
-                        interaction.channel_id,
+                        channel_id,
                         "Fal.AI",
                         "prompt",
                         False,
@@ -216,7 +220,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
                     )
 
                     display_prompt, full_prompt_url = await handle_text_overflow(
-                        bot, "prompt", prompt, interaction.channel_id
+                        bot, "prompt", prompt, channel_id
                     )
 
                     error_notes = [{"name": "Prompt", "value": display_prompt}]
@@ -239,7 +243,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
             )
 
             display_prompt, full_prompt_url = await handle_text_overflow(
-                bot, "prompt", prompt, interaction.channel_id
+                bot, "prompt", prompt, channel_id
             )
 
             error_notes = [{"name": "Prompt", "value": display_prompt}]
@@ -259,7 +263,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
             error_message = "An unexpected error occurred while processing your request."
 
             display_prompt, full_prompt_url = await handle_text_overflow(
-                bot, "prompt", prompt, interaction.channel_id
+                bot, "prompt", prompt, channel_id
             )
 
             error_notes = [{"name": "Prompt", "value": display_prompt}]
@@ -288,6 +292,8 @@ def register_image_commands(bot: "DiscordBot") -> None:
             interaction: The Discord interaction.
             timeout: The timeout for user interaction in seconds.
         """
+        assert interaction.channel_id is not None, "Command must be used in a channel"
+        channel_id = interaction.channel_id
         await interaction.response.defer()
 
         if timeout is None:
@@ -314,7 +320,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
             else:
                 str_image = json.dumps([result_data])
                 await bot.repo.add_message_with_images(
-                    interaction.channel_id,
+                    channel_id,
                     "Fal.AI",
                     "prompt",
                     False,
@@ -429,7 +435,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
             if selection_type == "Recent Images":
                 await sel_interaction.response.defer()
 
-                images = await bot.repo.get_images(interaction.channel_id, "All Models")
+                images = await bot.repo.get_images(channel_id, "All Models")
 
                 carousel_view = ImageCarouselView(
                     interaction=sel_interaction,

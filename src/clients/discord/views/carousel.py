@@ -23,7 +23,7 @@ EMBED_COLOR_ERROR = 0xE91515
 EMBED_COLOR_INFO = 0x3498DB
 
 
-def get_user_info(user: dict | None) -> tuple[str, int, str]:
+def get_user_info(user: dict[str, Any] | None) -> tuple[str, int, str]:
     """Get username, user ID, and avatar from a user dict.
 
     Args:
@@ -41,7 +41,7 @@ def get_user_info(user: dict | None) -> tuple[str, int, str]:
     )
 
 
-async def create_file_from_image(image_data: dict) -> discord.File:
+async def create_file_from_image(image_data: dict[str, str]) -> discord.File:
     """Create a discord.File object from base64 image data.
 
     Args:
@@ -61,12 +61,12 @@ class InfoEmbedView(discord.ui.View):
     def __init__(
         self,
         message: discord.Message | None = None,
-        user: dict | None = None,
+        user: dict[str, Any] | None = None,
         title: str = "Default Title",
         description: str | None = None,
         is_error: bool = False,
-        image_data: dict | None = None,
-        notes: list[dict] | None = None,
+        image_data: dict[str, str] | None = None,
+        notes: list[dict[str, str]] | None = None,
         full_response_url: str | None = None,
         full_prompt_url: str | None = None,
     ) -> None:
@@ -172,9 +172,9 @@ class ClearHistoryConfirmationView(discord.ui.View):
     def __init__(
         self,
         interaction: discord.Interaction,
-        user: dict | None = None,
+        user: dict[str, Any] | None = None,
         on_select: (
-            Callable[[discord.Interaction, dict | None, bool], Coroutine[Any, Any, None]]
+            Callable[[discord.Interaction, dict[str, Any] | None, bool], Coroutine[Any, Any, None]]
             | None
         ) = None,
     ) -> None:
@@ -219,7 +219,7 @@ class ClearHistoryConfirmationView(discord.ui.View):
 
     @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
     async def confirm_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction, button: discord.ui.Button["ClearHistoryConfirmationView"]
     ) -> None:
         await interaction.response.defer()
         self.hide_buttons()
@@ -230,7 +230,7 @@ class ClearHistoryConfirmationView(discord.ui.View):
 
     @discord.ui.button(label="Never Mind", style=discord.ButtonStyle.secondary)
     async def cancel_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction, button: discord.ui.Button["ClearHistoryConfirmationView"]
     ) -> None:
         await interaction.response.defer()
         self.hide_buttons()
@@ -246,7 +246,7 @@ class ImageSelectionTypeView(discord.ui.View):
     def __init__(
         self,
         interaction: discord.Interaction,
-        user: dict | None = None,
+        user: dict[str, Any] | None = None,
         on_select: (
             Callable[[discord.Interaction, str], Coroutine[Any, Any, None]] | None
         ) = None,
@@ -275,7 +275,7 @@ class ImageSelectionTypeView(discord.ui.View):
         # Check if the channel has recent images
         has_previous_image = False
         has_recent_images = False
-        if self.repo:
+        if self.repo and interaction.channel_id is not None:
             has_recent_images = await self.repo.has_images_in_context(
                 interaction.channel_id, "All Models"
             )
@@ -320,7 +320,7 @@ class ImageSelectionTypeView(discord.ui.View):
         label="Google (disabled)", style=discord.ButtonStyle.primary, disabled=True
     )
     async def last_image_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction, button: discord.ui.Button["ImageSelectionTypeView"]
     ) -> None:
         """Use most recently selected or uploaded image."""
         if self.user_id != interaction.user.id:
@@ -336,7 +336,7 @@ class ImageSelectionTypeView(discord.ui.View):
 
     @discord.ui.button(label="Recent Images", style=discord.ButtonStyle.primary)
     async def recent_images_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction, button: discord.ui.Button["ImageSelectionTypeView"]
     ) -> None:
         """Select a recent image from a carousel."""
         if self.user_id != interaction.user.id:
@@ -352,7 +352,7 @@ class ImageSelectionTypeView(discord.ui.View):
 
     @discord.ui.button(label="X", style=discord.ButtonStyle.danger)
     async def cancel_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction, button: discord.ui.Button["ImageSelectionTypeView"]
     ) -> None:
         """Cancel selection."""
         if self.user_id != interaction.user.id:
@@ -375,11 +375,11 @@ class ImageCarouselView(discord.ui.View):
     def __init__(
         self,
         interaction: discord.Interaction,
-        files: list[dict],
-        user: dict | None = None,
+        files: list[dict[str, str]],
+        user: dict[str, Any] | None = None,
         message: discord.Message | None = None,
         on_select: (
-            Callable[[discord.Interaction, dict | None], Coroutine[Any, Any, None]]
+            Callable[[discord.Interaction, dict[str, str] | None], Coroutine[Any, Any, None]]
             | None
         ) = None,
     ) -> None:
@@ -442,7 +442,7 @@ class ImageCarouselView(discord.ui.View):
         )
         return embed, None
 
-    def get_current_file(self) -> dict:
+    def get_current_file(self) -> dict[str, str]:
         """Return the image file data of the currently shown image."""
         return self.files[self.current_index]
 
@@ -529,7 +529,7 @@ class ImageCarouselView(discord.ui.View):
 
     @discord.ui.button(label="<", style=discord.ButtonStyle.primary)
     async def previous_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction, button: discord.ui.Button["ImageCarouselView"]
     ) -> None:
         """Navigate to previous image."""
         await interaction.response.defer()
@@ -539,7 +539,7 @@ class ImageCarouselView(discord.ui.View):
 
     @discord.ui.button(label=">", style=discord.ButtonStyle.primary)
     async def next_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction, button: discord.ui.Button["ImageCarouselView"]
     ) -> None:
         """Navigate to next image."""
         await interaction.response.defer()
@@ -549,7 +549,7 @@ class ImageCarouselView(discord.ui.View):
 
     @discord.ui.button(label="Select", style=discord.ButtonStyle.success)
     async def accept_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction, button: discord.ui.Button["ImageCarouselView"]
     ) -> None:
         """Accept current image selection."""
         selected_image = self.get_current_file()
@@ -559,7 +559,7 @@ class ImageCarouselView(discord.ui.View):
 
     @discord.ui.button(label="X", style=discord.ButtonStyle.danger)
     async def cancel_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction, button: discord.ui.Button["ImageCarouselView"]
     ) -> None:
         """Cancel image selection."""
         if self.on_select:
@@ -574,8 +574,8 @@ class ImageEditTypeView(discord.ui.View):
 
     def __init__(
         self,
-        image_data: dict,
-        user: dict | None = None,
+        image_data: dict[str, str],
+        user: dict[str, Any] | None = None,
         message: discord.Message | None = None,
         on_select: (
             Callable[[discord.Interaction, str, str], Coroutine[Any, Any, None]] | None
@@ -626,7 +626,7 @@ class ImageEditTypeView(discord.ui.View):
 
     @discord.ui.button(label="Adjust", style=discord.ButtonStyle.primary, row=0)
     async def adjust_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction, button: discord.ui.Button["ImageEditTypeView"]
     ) -> None:
         if self.on_select:
             if self.user_id != interaction.user.id:
@@ -652,7 +652,7 @@ class ImageEditTypeView(discord.ui.View):
 
     @discord.ui.button(label="Redraw", style=discord.ButtonStyle.primary, row=0)
     async def redraw_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction, button: discord.ui.Button["ImageEditTypeView"]
     ) -> None:
         if self.on_select:
             if self.user_id != interaction.user.id:
@@ -683,7 +683,7 @@ class ImageEditTypeView(discord.ui.View):
         row=0,
     )
     async def random_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction, button: discord.ui.Button["ImageEditTypeView"]
     ) -> None:
         if self.on_select:
             if self.user_id != interaction.user.id:
@@ -709,7 +709,7 @@ class ImageEditTypeView(discord.ui.View):
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger, row=0)
     async def cancel_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction, button: discord.ui.Button["ImageEditTypeView"]
     ) -> None:
         if self.on_select:
             if self.user_id != interaction.user.id:
@@ -731,9 +731,9 @@ class ImageEditPromptModal(discord.ui.Modal, title="Image Edit Instructions"):
 
     def __init__(
         self,
-        image_data: dict,
+        image_data: dict[str, str],
         edit_type: str,
-        user: dict | None,
+        user: dict[str, Any] | None,
         message: discord.Message | None,
         initial_text: str = "",
         on_select: (
@@ -788,12 +788,12 @@ class ImageEditPerformView(discord.ui.View):
         self,
         interaction: discord.Interaction,
         message: discord.Message,
-        user: dict | None,
-        image_data: dict,
+        user: dict[str, Any] | None,
+        image_data: dict[str, str],
         edit_type: str,
         prompt: str = "`placeholder`",
         on_complete: (
-            Callable[[discord.Interaction, dict], Coroutine[Any, Any, None]] | None
+            Callable[[discord.Interaction, dict[str, Any]], Coroutine[Any, Any, None]] | None
         ) = None,
         rate_limiter: "SlidingWindowRateLimiter | None" = None,
         image_provider: "ImageProvider | None" = None,

@@ -127,6 +127,8 @@ def register_chat_commands(bot: "DiscordBot") -> None:
             upload: An optional image attachment.
             timeout: The timeout for the request in seconds.
         """
+        assert interaction.channel_id is not None, "Command must be used in a channel"
+        channel_id = interaction.channel_id
         await interaction.response.defer()
 
         if timeout is None:
@@ -155,10 +157,10 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                             await upload.to_file()
                     str_images = json.dumps(images)
 
-                    await bot.repo.create_channel(interaction.channel_id)
+                    await bot.repo.create_channel(channel_id)
                     if images:
                         await bot.repo.add_message_with_images(
-                            interaction.channel_id,
+                            channel_id,
                             "Anthropic",
                             "prompt",
                             False,
@@ -167,22 +169,22 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                         )
                     else:
                         await bot.repo.add_message(
-                            interaction.channel_id, "Anthropic", "prompt", False, prompt
+                            channel_id, "Anthropic", "prompt", False, prompt
                         )
 
                     context = await bot.repo.get_visible_messages(
-                        interaction.channel_id, "All Models"
+                        channel_id, "All Models"
                     )
 
                     deactivate_old_messages = False
                     if len(context) >= WINDOW:
                         deactivate_old_messages = True
                         await bot.repo.deactivate_old_messages(
-                            interaction.channel_id, "All Models", WINDOW
+                            channel_id, "All Models", WINDOW
                         )
 
                     display_prompt, full_prompt_url = await handle_text_overflow(
-                        bot, "prompt", prompt, interaction.channel_id
+                        bot, "prompt", prompt, channel_id
                     )
 
                     processing_message = "Thinking... (This may take up to 30 seconds)"
@@ -204,7 +206,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                     await processing_view.initialize(interaction)
 
                     display_prompt, full_prompt_url = await handle_text_overflow(
-                        bot, "prompt", prompt, interaction.channel_id
+                        bot, "prompt", prompt, channel_id
                     )
 
                     # Convert context to ChatMessages and extract system prompt
@@ -214,7 +216,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                     )
                     response = chat_response.content
                     await bot.repo.add_message(
-                        interaction.channel_id, "Anthropic", "assistant", False, response
+                        channel_id, "Anthropic", "assistant", False, response
                     )
 
                     await bot.rate_limiter.record(interaction.user.id, "chat")
@@ -223,7 +225,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                         pass  # Could add note about pruned messages
 
                     display_response, full_response_url = await handle_text_overflow(
-                        bot, "response", response, interaction.channel_id
+                        bot, "response", response, channel_id
                     )
 
                     info_notes = [
@@ -314,6 +316,8 @@ def register_chat_commands(bot: "DiscordBot") -> None:
             prompt: The behavior change prompt.
             timeout: The timeout for the request in seconds.
         """
+        assert interaction.channel_id is not None, "Command must be used in a channel"
+        channel_id = interaction.channel_id
         await interaction.response.defer()
 
         if timeout is None:
@@ -323,18 +327,18 @@ def register_chat_commands(bot: "DiscordBot") -> None:
 
         try:
             async with asyncio.timeout(timeout):
-                await bot.repo.create_channel(interaction.channel_id)
+                await bot.repo.create_channel(channel_id)
                 await bot.repo.add_message(
-                    interaction.channel_id, "Anthropic", "behavior", False, prompt
+                    channel_id, "Anthropic", "behavior", False, prompt
                 )
 
                 # Refresh context after adding message (result not used, but triggers DB update)
                 await bot.repo.get_visible_messages(
-                    interaction.channel_id, "All Models"
+                    channel_id, "All Models"
                 )
 
                 display_prompt, full_prompt_url = await handle_text_overflow(
-                    bot, "prompt", prompt, interaction.channel_id
+                    bot, "prompt", prompt, channel_id
                 )
 
                 processing_message = (
@@ -358,11 +362,11 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                     f"\n\n{prompt}"
                 )
                 await bot.repo.add_message(
-                    interaction.channel_id, "Anthropic", "assistant", False, response
+                    channel_id, "Anthropic", "assistant", False, response
                 )
 
                 display_response, full_response_url = await handle_text_overflow(
-                    bot, "response", response, interaction.channel_id
+                    bot, "response", response, channel_id
                 )
 
                 success_notes = [
@@ -423,6 +427,8 @@ def register_chat_commands(bot: "DiscordBot") -> None:
             interaction: The Discord interaction.
             timeout: The timeout for the operation in seconds.
         """
+        assert interaction.channel_id is not None, "Command must be used in a channel"
+        channel_id = interaction.channel_id
         await interaction.response.defer()
 
         if timeout is None:
@@ -436,7 +442,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
             confirmed: bool,
         ) -> None:
             if confirmed:
-                await bot.repo.deactivate_all_messages(interaction.channel_id)
+                await bot.repo.deactivate_all_messages(channel_id)
                 success_message = (
                     "The bot's memory for this channel has been cleared. "
                     "All prior messages and images have been forgotten."
