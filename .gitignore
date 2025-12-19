@@ -5,3 +5,6 @@ __pycache__/*
 *.pyc
 .DS_Store
 site/*
+
+# Beads issue tracking (local state)
+.beads/

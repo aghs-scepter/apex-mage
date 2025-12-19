@@ -32,6 +32,28 @@ echo "Enter your Fal.AI API key:"
 read -rs FAL_KEY
 echo ""
 
+# GHCR authentication setup
+echo "The container image is hosted on GitHub Container Registry (GHCR)."
+echo "If the image is private, you'll need to provide authentication credentials."
+echo "Would you like to configure GHCR authentication? (y/N)"
+read -r CONFIGURE_GHCR
+CONFIGURE_GHCR=${CONFIGURE_GHCR:-n}
+CONFIGURE_GHCR=$(echo "$CONFIGURE_GHCR" | tr '[:upper:]' '[:lower:]')
+echo ""
+
+if [ "$CONFIGURE_GHCR" = "y" ]; then
+    echo "Enter your GitHub username:"
+    read -r GITHUB_USERNAME
+    echo ""
+
+    echo "Enter your GitHub Personal Access Token (with read:packages scope):"
+    read -rs GHCR_TOKEN
+    echo ""
+else
+    GITHUB_USERNAME=""
+    GHCR_TOKEN=""
+fi
+
 echo "There are additional settings you can configure, such as rate-limits for requests to prevent API abuse. The defaults are sensible, but you can customize them. Would you like to configure these settings now? (Y/n)"
 read -r CONFIGURE_SETTINGS
 CONFIGURE_SETTINGS=${CONFIGURE_SETTINGS:-Y}
@@ -77,6 +99,8 @@ FAL_KEY=$FAL_KEY
 ANTHROPIC_RATE_LIMIT=$ANTHROPIC_RATE_LIMIT
 FAL_RATE_LIMIT=$FAL_RATE_LIMIT
 IMAGE_CONTEXT_SIZE=$IMAGE_CONTEXT_SIZE
+GITHUB_USERNAME=$GITHUB_USERNAME
+GHCR_TOKEN=$GHCR_TOKEN
 EOF
 
 echo "Your API keys and settings have been saved to /app/.env. You can run update-keys.sh to update these keys and settings at any time."
