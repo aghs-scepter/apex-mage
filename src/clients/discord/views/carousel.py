@@ -390,7 +390,7 @@ class ImageCarouselView(discord.ui.View):
         self.embed: discord.Embed | None = None
         self.files = files
         self.embed_image: discord.File | None = None
-        self.current_index = (len(self.files) - 1) if self.files else 0
+        self.current_index = 0
         self.on_select = on_select
         self.message = message
         self.healthy = bool(self.files)
@@ -429,7 +429,7 @@ class ImageCarouselView(discord.ui.View):
         bar_icons = ""
         for i in range(total):
             bar_icons += "\u2b25" if i == current_index else "\u2b26"
-        return f"(Oldest) {bar_icons} (Newest)"
+        return f"(Newest) {bar_icons} (Oldest)"
 
     async def create_error_embed(
         self, interaction: discord.Interaction, error_message: str
@@ -553,8 +553,9 @@ class ImageCarouselView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button["ImageCarouselView"]
     ) -> None:
         """Accept current image selection."""
-        selected_image = self.get_current_file()
         if self.on_select:
+            await interaction.response.defer()
+            selected_image = self.get_current_file()
             self.disable_buttons()
             await self.on_select(interaction, selected_image)
 
@@ -564,6 +565,7 @@ class ImageCarouselView(discord.ui.View):
     ) -> None:
         """Cancel image selection."""
         if self.on_select:
+            await interaction.response.defer()
             self.hide_buttons()
             if self.message:
                 await self.message.edit(view=self)
