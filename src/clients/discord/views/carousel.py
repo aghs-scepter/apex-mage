@@ -823,7 +823,11 @@ class ImageEditPerformView(discord.ui.View):
                 raise ValueError("Modified image has no URL")
             result_image_data = image_strip_headers(modified_image.url, "jpeg")
             result_image_data = await asyncio.to_thread(compress_image, result_image_data)
-            image_return = {"filename": "image.jpeg", "image": result_image_data}
+            image_return = {
+                "filename": "image.jpeg",
+                "image": result_image_data,
+                "prompt": prompt,
+            }
 
             # Record the request after successful operation
             if self.rate_limiter:

@@ -242,6 +242,7 @@ class FalAIProvider:
             "resolution": "1K",
             "output_format": "png",
             "sync_mode": True,
+            "enable_web_search": True,
         }
 
         # Add optional parameters if provided
@@ -258,11 +259,15 @@ class FalAIProvider:
 
         # Call with retry logic for transient errors
         result = await self._call_with_retry(subscribe, "image generation")
-        logger.debug("Image generation completed.")
+        logger.debug("Image generation completed. API response: %s", result)
 
         # Convert response to GeneratedImage list
         images = []
         result_images = result.get("images", [])
+        if not result_images:
+            logger.warning(
+                "No images in API response. Full result: %s", result
+            )
         has_nsfw_list = result.get("has_nsfw_concepts", [])
 
         for i, img_data in enumerate(result_images):
@@ -322,6 +327,7 @@ class FalAIProvider:
             "resolution": "1K",
             "output_format": "jpeg",
             "sync_mode": True,
+            "enable_web_search": True,
         }
 
         def subscribe() -> dict[str, Any]:

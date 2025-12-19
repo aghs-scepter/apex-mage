@@ -333,11 +333,14 @@ def register_image_commands(bot: "DiscordBot") -> None:
                     "Your image was modified successfully. "
                     "You can use it for future `/prompt` and `/modify_image` commands."
                 )
-                # result_data contains filename and image keys when successful
+                # result_data contains filename, image, and prompt keys when successful
                 image_data_typed: dict[str, str] = {
                     "filename": str(result_data.get("filename", "")),
                     "image": str(result_data.get("image", "")),
                 }
+                # Include prompt in success embed notes (like create_image does)
+                prompt = result_data.get("prompt", "")
+                output_notes = [{"name": "Prompt", "value": prompt}] if prompt else None
                 success_view = InfoEmbedView(
                     message=interaction.message,
                     user=embed_user,
@@ -345,6 +348,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
                     description=success_message,
                     is_error=False,
                     image_data=image_data_typed,
+                    notes=output_notes,
                 )
                 await success_view.initialize(edit_interaction)
 
