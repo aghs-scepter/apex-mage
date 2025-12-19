@@ -985,19 +985,25 @@ class MultiImageCarouselView(discord.ui.View):
     def generate_image_chrono_bar(self, current_index: int, total: int) -> str:
         """Generate a visual position indicator for the carousel.
 
-        Shows selected images with a different marker.
+        Uses bracket notation to show position and selection status:
+        - Current + selected: 【✓】
+        - Current + unselected: 【 】
+        - Other + selected: [✓]
+        - Other + unselected: [ ]
         """
         bar_icons = ""
         for i in range(total):
-            if i == current_index:
-                # Current position - filled diamond
-                bar_icons += "\u2b25"
-            elif i in self.selected_indices:
-                # Selected but not current - checkmark
-                bar_icons += "\u2713"
+            is_current = i == current_index
+            is_selected = i in self.selected_indices
+
+            if is_current and is_selected:
+                bar_icons += "【✓】"
+            elif is_current and not is_selected:
+                bar_icons += "【 】"
+            elif not is_current and is_selected:
+                bar_icons += "[✓]"
             else:
-                # Not selected - empty diamond
-                bar_icons += "\u2b26"
+                bar_icons += "[ ]"
         return f"(Newest) {bar_icons} (Oldest)"
 
     def generate_selection_status(self) -> str:
