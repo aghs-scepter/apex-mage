@@ -117,3 +117,89 @@ def format_image_response(
         filename = f"{uuid4()}.{file_extension}"
 
     return filename, image_bytes
+
+
+def create_composite_thumbnail(
+    images: list[str],
+    thumb_height: int = 512,
+    thumb_width: int = 384,
+) -> str:
+    """Create a horizontal strip composite of multiple images.
+
+    Args:
+        images: List of base64-encoded image strings (1-3 images).
+        thumb_height: Height of each thumbnail in pixels (default 512).
+        thumb_width: Width of each thumbnail in pixels (default 384, which is 3/4 of 512).
+
+    Returns:
+        Base64-encoded composite image string (JPEG format).
+
+    Raises:
+        ValueError: If images list is empty.
+
+    Notes:
+        - Single image: Returns resized/cropped thumbnail of that image
+        - Multiple images: Returns horizontal strip (e.g., 768px or 1152px wide
+          for 2-3 images)
+        - Images are center-cropped to fit the thumbnail dimensions
+          (equal amount cut from both sides for wide images, top/bottom for
+          tall images)
+    """
+    if not images:
+        raise ValueError("images list cannot be empty")
+
+    thumbnails: list[PILImage] = []
+    for image_b64 in images:
+        # Decode the base64 image
+        try:
+            image_data = base64.b64decode(image_b64)
+        except binascii.Error:
+            # Add extra padding only if initial decode fails
+            padded = image_b64
+            while len(padded) % 4:
+                padded += "="
+            image_data = base64.b64decode(padded)
+
+        img: PILImage = Image.open(io.BytesIO(image_data))
+
+        # Convert RGBA or P modes to RGB if necessary
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+
+        # Calculate center crop to match the target aspect ratio
+        target_ratio = thumb_width / thumb_height
+        current_ratio = img.size[0] / img.size[1]
+
+        if current_ratio > target_ratio:
+            # Image is wider than target - crop width (sides)
+            new_width = int(img.size[1] * target_ratio)
+            left = (img.size[0] - new_width) // 2
+            crop_box = (left, 0, left + new_width, img.size[1])
+        else:
+            # Image is taller than target - crop height (top/bottom)
+            new_height = int(img.size[0] / target_ratio)
+            top = (img.size[1] - new_height) // 2
+            crop_box = (0, top, img.size[0], top + new_height)
+
+        cropped = img.crop(crop_box)
+
+        # Resize to target dimensions
+        thumbnail = cropped.resize(
+            (thumb_width, thumb_height), Image.Resampling.LANCZOS
+        )
+        thumbnails.append(thumbnail)
+
+    # Create composite canvas
+    total_width = thumb_width * len(thumbnails)
+    composite = Image.new("RGB", (total_width, thumb_height))
+
+    # Paste thumbnails side by side
+    for i, thumbnail in enumerate(thumbnails):
+        composite.paste(thumbnail, (i * thumb_width, 0))
+
+    # Save to BytesIO buffer as JPEG
+    buffer = io.BytesIO()
+    composite.save(buffer, format="JPEG", quality=85, optimize=True)
+
+    # Convert to base64
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")

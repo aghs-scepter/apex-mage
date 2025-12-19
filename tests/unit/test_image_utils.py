@@ -9,6 +9,7 @@ from PIL import Image
 
 from src.core.image_utils import (
     compress_image,
+    create_composite_thumbnail,
     format_image_response,
     image_strip_headers,
 )
@@ -182,3 +183,129 @@ class TestFormatImageResponse:
         expected_bytes = base64.b64decode(sample_image_b64)
         _, image_bytes = format_image_response(sample_image_b64, "jpeg", False)
         assert image_bytes == expected_bytes
+
+
+class TestCreateCompositeThumbnail:
+    """Tests for create_composite_thumbnail function."""
+
+    @pytest.fixture
+    def square_image_b64(self):
+        """Create a square base64-encoded image."""
+        img = Image.new("RGB", (200, 200), color="red")
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG")
+        return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+    @pytest.fixture
+    def wide_image_b64(self):
+        """Create a wide base64-encoded image (wider than 3:4 ratio)."""
+        img = Image.new("RGB", (400, 200), color="green")
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG")
+        return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+    @pytest.fixture
+    def tall_image_b64(self):
+        """Create a tall base64-encoded image (taller than 3:4 ratio)."""
+        img = Image.new("RGB", (200, 400), color="blue")
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG")
+        return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+    def test_single_image_returns_resized_thumbnail(self, square_image_b64):
+        """Single image should return a resized thumbnail."""
+        result = create_composite_thumbnail([square_image_b64])
+
+        # Decode and check dimensions
+        decoded = base64.b64decode(result)
+        img = Image.open(io.BytesIO(decoded))
+
+        assert img.size == (384, 512)
+        assert img.format == "JPEG"
+
+    def test_two_images_returns_horizontal_strip(
+        self, square_image_b64, wide_image_b64
+    ):
+        """Two images should return a horizontal strip of correct dimensions."""
+        result = create_composite_thumbnail([square_image_b64, wide_image_b64])
+
+        # Decode and check dimensions
+        decoded = base64.b64decode(result)
+        img = Image.open(io.BytesIO(decoded))
+
+        # 2 images x 384 width = 768 total width
+        assert img.size == (768, 512)
+        assert img.format == "JPEG"
+
+    def test_three_images_returns_horizontal_strip(
+        self, square_image_b64, wide_image_b64, tall_image_b64
+    ):
+        """Three images should return a horizontal strip of correct dimensions."""
+        result = create_composite_thumbnail(
+            [square_image_b64, wide_image_b64, tall_image_b64]
+        )
+
+        # Decode and check dimensions
+        decoded = base64.b64decode(result)
+        img = Image.open(io.BytesIO(decoded))
+
+        # 3 images x 384 width = 1152 total width
+        assert img.size == (1152, 512)
+        assert img.format == "JPEG"
+
+    def test_empty_list_raises_value_error(self):
+        """Empty images list should raise ValueError."""
+        with pytest.raises(ValueError, match="images list cannot be empty"):
+            create_composite_thumbnail([])
+
+    def test_custom_dimensions(self, square_image_b64):
+        """Should respect custom thumb_height and thumb_width."""
+        result = create_composite_thumbnail(
+            [square_image_b64], thumb_height=256, thumb_width=192
+        )
+
+        decoded = base64.b64decode(result)
+        img = Image.open(io.BytesIO(decoded))
+
+        assert img.size == (192, 256)
+
+    def test_center_crops_wide_image(self, wide_image_b64):
+        """Wide images should be center-cropped (sides removed)."""
+        # The function should crop a wide 400x200 image to 3:4 ratio
+        # then resize to 384x512
+        result = create_composite_thumbnail([wide_image_b64])
+
+        decoded = base64.b64decode(result)
+        img = Image.open(io.BytesIO(decoded))
+
+        # Result should have correct dimensions
+        assert img.size == (384, 512)
+
+    def test_center_crops_tall_image(self, tall_image_b64):
+        """Tall images should be center-cropped (top/bottom removed)."""
+        # The function should crop a tall 200x400 image to 3:4 ratio
+        # then resize to 384x512
+        result = create_composite_thumbnail([tall_image_b64])
+
+        decoded = base64.b64decode(result)
+        img = Image.open(io.BytesIO(decoded))
+
+        # Result should have correct dimensions
+        assert img.size == (384, 512)
+
+    def test_handles_rgba_images(self):
+        """Should handle RGBA images by converting to RGB."""
+        # Create an RGBA image
+        img = Image.new("RGBA", (200, 200), color=(255, 0, 0, 128))
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG")
+        rgba_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+        result = create_composite_thumbnail([rgba_b64])
+
+        decoded = base64.b64decode(result)
+        result_img = Image.open(io.BytesIO(decoded))
+
+        # Should be converted to RGB for JPEG output
+        assert result_img.mode == "RGB"
+        assert result_img.format == "JPEG"
