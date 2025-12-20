@@ -32,10 +32,12 @@ elif [ "$(docker ps -aq -f status=exited -f name=apex-mage)" ]; then
 fi
 
 # Run the container with the SQLite DB directory mounted and environment variables loaded
+# SYNC_COMMANDS passthrough: allows running `SYNC_COMMANDS=true bash start.sh` to sync Discord commands
 echo "Starting container..."
 docker run -d --name apex-mage --restart unless-stopped \
     --env-file /app/.env \
     -e GOOGLE_APPLICATION_CREDENTIALS=/app/g_auth.json \
+    ${SYNC_COMMANDS:+-e SYNC_COMMANDS="$SYNC_COMMANDS"} \
     -v /appdata:/app/data \
     -v /usr/bin/docker:/usr/bin/docker \
     -v /app/g_auth.json:/app/g_auth.json \
