@@ -640,9 +640,15 @@ class ImageEditTypeView(discord.ui.View):
         num_images = len(self.image_data_list)
         title = "Edit Image" if num_images == 1 else f"Edit Images ({num_images})"
 
-        self.embed = discord.Embed(
-            title=title, description="Select an editing option:"
-        )
+        # Build description with optional multi-image instructions
+        description = "Choose how to modify your images, or go back to change your selection."
+        if num_images > 1:
+            description += (
+                "\n\nReference images by description (e.g., 'the sunset photo'), "
+                "not by position—the AI sees them together without a specific order."
+            )
+
+        self.embed = discord.Embed(title=title, description=description)
         self.embed.set_author(
             name=f"{self.username} (via Apex Mage)",
             url="https://github.com/aghs-scepter/apex-mage",
