@@ -27,6 +27,7 @@ AI-powered conversational assistant with multi-channel support. Currently a Disc
 | `src/clients/` | Client adapters - discord, web (target) |
 | `src/db/` | Database access, migrations (target) |
 | `docs/data-model.md` | Canonical schema definition |
+| `docs/deployment.md` | Deployment guide and GitHub Secrets |
 | `docs/beads/` | Bead specifications |
 | `.github/workflows/` | CI/CD pipelines |
 | `history/` | AI-generated planning documents |
@@ -82,6 +83,18 @@ pytest                                    # Run all tests
 pytest --cov=src --cov-report=term-missing  # With coverage
 pytest tests/core/                        # Specific module
 ```
+
+## Deployment
+
+Automated deployment to GCE is configured via GitHub Actions. See [`docs/deployment.md`](docs/deployment.md) for full setup instructions.
+
+**Required GitHub Secrets:**
+
+| Secret | Description |
+|--------|-------------|
+| `SSH_PRIVATE_KEY` | Private SSH key for VM access |
+| `VM_IP` | IP address of GCE VM |
+| `VM_USER` | SSH username on the VM |
 
 ## Quick Reference
 
