@@ -708,6 +708,23 @@ class ImageEditTypeView(discord.ui.View):
             )
             await interaction.response.send_modal(prompt_modal)
 
+    @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary, row=0)
+    async def back_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button["ImageEditTypeView"]
+    ) -> None:
+        """Return to the image selection carousel."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can select this option.",
+                ephemeral=True,
+            )
+            return
+
+        if self.on_back:
+            await interaction.response.defer()
+            self.hide_buttons()
+            await self.on_back(interaction)
+
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger, row=0)
     async def cancel_button(
         self, interaction: discord.Interaction, button: discord.ui.Button["ImageEditTypeView"]
@@ -992,6 +1009,7 @@ class MultiImageCarouselView(discord.ui.View):
             ]
             | None
         ) = None,
+        initial_selections: list[int] | None = None,
     ) -> None:
         """Initialize the multi-image carousel view.
 
@@ -1003,6 +1021,8 @@ class MultiImageCarouselView(discord.ui.View):
             on_select: Callback when user confirms selection. Receives the
                 interaction and list of selected image dicts. Empty list
                 indicates cancellation.
+            initial_selections: Optional list of pre-selected image indices
+                for restoring state when navigating back.
         """
         super().__init__(timeout=180.0)
         self.user = user
@@ -1011,7 +1031,9 @@ class MultiImageCarouselView(discord.ui.View):
         self.files = files
         self.embed_image: discord.File | None = None
         self.current_index = 0
-        self.selected_indices: list[int] = []  # Track selected image indices
+        self.selected_indices: list[int] = (
+            list(initial_selections) if initial_selections else []
+        )
         self.on_select = on_select
         self.message = message
         self.healthy = bool(self.files)

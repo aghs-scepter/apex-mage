@@ -383,13 +383,15 @@ def register_image_commands(bot: "DiscordBot") -> None:
             await perform_view.initialize(edit_interaction)
 
         selected_images: list[dict[str, str]] = []
+        carousel_files: list[dict[str, str]] = []
+        selected_indices: list[int] = []
 
         async def on_image_selected(
             img_interaction: discord.Interaction,
             image_data_list: list[dict[str, str]],
         ) -> None:
             """Handle image selection from multi-image carousel."""
-            nonlocal selected_images
+            nonlocal selected_images, selected_indices
 
             if not image_data_list:
                 # Empty list = cancelled
@@ -398,6 +400,26 @@ def register_image_commands(bot: "DiscordBot") -> None:
 
             selected_images = image_data_list
 
+            # Compute selected indices by finding the images in carousel_files
+            selected_indices = []
+            for img in image_data_list:
+                for idx, f in enumerate(carousel_files):
+                    if f["image"] == img["image"]:
+                        selected_indices.append(idx)
+                        break
+
+            async def on_back(back_interaction: discord.Interaction) -> None:
+                """Return to the carousel with preserved selection state."""
+                carousel_view = MultiImageCarouselView(
+                    interaction=back_interaction,
+                    files=carousel_files,
+                    user=embed_user,
+                    message=back_interaction.message,
+                    on_select=on_image_selected,
+                    initial_selections=selected_indices,
+                )
+                await carousel_view.initialize(back_interaction)
+
             # Pass all selected images for composite thumbnail display
             edit_type_view = ImageEditTypeView(
                 image_data=selected_images[0],
@@ -405,6 +427,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
                 message=img_interaction.message,
                 on_select=on_edit_type_selected,
                 image_data_list=selected_images,
+                on_back=on_back,
             )
             await edit_type_view.initialize(img_interaction)
 
@@ -412,6 +435,8 @@ def register_image_commands(bot: "DiscordBot") -> None:
             sel_interaction: discord.Interaction, selection_type: str
         ) -> None:
             """Handle selection type choice."""
+            nonlocal carousel_files
+
             if selection_type == "Cancel":
                 # Embed already updated by the view's cancel handler
                 # Just need to respond to the interaction if needed
@@ -423,6 +448,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
                 await sel_interaction.response.defer()
 
                 images = await bot.repo.get_images(channel_id, "All Models")
+                carousel_files = images  # Store for back navigation
 
                 # Use MultiImageCarouselView for multi-image selection
                 carousel_view = MultiImageCarouselView(
