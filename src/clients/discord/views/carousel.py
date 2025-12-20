@@ -1090,7 +1090,10 @@ class MultiImageCarouselView(discord.ui.View):
 
         Example (viewing image 2, images 1 and 2 selected of 4 total):
             (Newest) ○ ● ○ ○ (Oldest)
-            Selected: ✓ ✓ ∘ ∘
+            Selected: ✓ ✓ ∘  ∘
+
+        Note: Consecutive ring operators use 2 spaces between them for Discord
+        font alignment (ring is narrower than checkmark).
         """
         position_symbols = []
         selected_symbols = []
@@ -1109,8 +1112,19 @@ class MultiImageCarouselView(discord.ui.View):
                 selected_symbols.append("∘")  # Ring operator (U+2218)
 
         position_line = "(Newest) " + " ".join(position_symbols) + " (Oldest)"
-        # Use "Selected:" label for alignment (Discord strips leading whitespace)
-        selected_line = "Selected: " + " ".join(selected_symbols)
+        # Build selected line with conditional spacing for Discord font alignment
+        # Ring operator (∘) is narrower than checkmark (✓), so consecutive rings need 2 spaces
+        selected_parts = []
+        for i, symbol in enumerate(selected_symbols):
+            selected_parts.append(symbol)
+            if i < len(selected_symbols) - 1:  # Not the last symbol
+                next_symbol = selected_symbols[i + 1]
+                # Ring followed by ring needs 2 spaces for alignment
+                if symbol == "∘" and next_symbol == "∘":
+                    selected_parts.append("  ")
+                else:
+                    selected_parts.append(" ")
+        selected_line = "Selected: " + "".join(selected_parts)
 
         return f"{position_line}\n{selected_line}"
 
