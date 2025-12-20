@@ -366,6 +366,8 @@ def register_image_commands(bot: "DiscordBot") -> None:
                 # Include prompt in success embed notes (like create_image does)
                 prompt = result_data.get("prompt", "")
                 output_notes = [{"name": "Prompt", "value": prompt}] if prompt else None
+                # Get cloud_url for download button (may be None if GCS not configured)
+                download_url = result_data.get("cloud_url")
                 success_view = InfoEmbedView(
                     message=interaction.message,
                     user=embed_user,
@@ -374,6 +376,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
                     is_error=False,
                     image_data=image_data_typed,
                     notes=output_notes,
+                    download_url=download_url,
                 )
                 await success_view.initialize(edit_interaction)
 

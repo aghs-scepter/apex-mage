@@ -133,6 +133,16 @@ class InfoEmbedView(discord.ui.View):
                 )
             )
 
+        # Add download image button if URL is provided
+        if self.download_url:
+            self.add_item(
+                discord.ui.Button(
+                    label="Download Image",
+                    url=self.download_url,
+                    style=discord.ButtonStyle.link,
+                )
+            )
+
         if self.image_data:
             embed_image = await create_file_from_image(self.image_data)
             self.embed.set_image(url=f"attachment://{embed_image.filename}")
