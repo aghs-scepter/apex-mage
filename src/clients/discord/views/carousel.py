@@ -1081,52 +1081,34 @@ class MultiImageCarouselView(discord.ui.View):
         """Get the list of selected image data dicts."""
         return [self.files[i] for i in self.selected_indices]
 
-    def generate_image_chrono_bar(self, current_index: int, total: int) -> str:
-        """Generate a visual position indicator for the carousel.
+    def generate_image_chrono_bar(self) -> str:
+        """Generate a single-line chronological bar showing position and selection.
 
-        Uses two-line display format:
-        - Position line: temporal labels with filled circle for current, empty for others
-        - Selection line: checkmark for selected, ring for unselected (aligned)
+        Uses brackets to indicate current position:
+        - \u25cb = not selected, not current
+        - \u2713 = selected, not current
+        - [(\u25cb)] = current position, not selected
+        - [(\u2713)] = current position, selected
 
-        Example (viewing image 2, images 1 and 2 selected of 4 total):
-            (Newest) ○ ● ○ ○ (Oldest)
-            Selected: ✓ ✓ ∘  ∘
-
-        Note: Consecutive ring operators use 2 spaces between them for Discord
-        font alignment (ring is narrower than checkmark).
+        Example (viewing image 3, images 2 and 5 selected of 5 total):
+            (Newest) \u25cb \u2713 [(\u25cb)] \u25cb \u2713 (Oldest)
         """
-        position_symbols = []
-        selected_symbols = []
+        symbols = []
+        for i in range(len(self.files)):
+            is_current = i == self.current_index
+            is_selected = i in self.selected_indices
 
-        for i in range(total):
-            # Position indicator: filled circle for current, empty for others
-            if i == current_index:
-                position_symbols.append("●")  # Black circle (U+25CF)
+            if is_selected:
+                symbol = "\u2713"  # Checkmark
             else:
-                position_symbols.append("○")  # White circle (U+25CB)
+                symbol = "\u25cb"  # White circle
 
-            # Selection indicator: checkmark for selected, ring for unselected
-            if i in self.selected_indices:
-                selected_symbols.append("✓")  # Checkmark (U+2713)
-            else:
-                selected_symbols.append("∘")  # Ring operator (U+2218)
+            if is_current:
+                symbol = f"[({symbol})]"
 
-        position_line = "(Newest) " + " ".join(position_symbols) + " (Oldest)"
-        # Build selected line with conditional spacing for Discord font alignment
-        # Ring operator (∘) is narrower than checkmark (✓), so consecutive rings need 2 spaces
-        selected_parts = []
-        for i, symbol in enumerate(selected_symbols):
-            selected_parts.append(symbol)
-            if i < len(selected_symbols) - 1:  # Not the last symbol
-                next_symbol = selected_symbols[i + 1]
-                # Ring followed by ring needs 2 spaces for alignment
-                if symbol == "∘" and next_symbol == "∘":
-                    selected_parts.append("  ")
-                else:
-                    selected_parts.append(" ")
-        selected_line = "Selected: " + "".join(selected_parts)
+            symbols.append(symbol)
 
-        return f"{position_line}\n{selected_line}"
+        return "(Newest) " + " ".join(symbols) + " (Oldest)"
 
     async def create_error_embed(
         self, interaction: discord.Interaction, error_message: str
@@ -1148,9 +1130,7 @@ class MultiImageCarouselView(discord.ui.View):
 
         embed = discord.Embed(
             title="Select Images (up to 3)",
-            description=self.generate_image_chrono_bar(
-                self.current_index, len(self.files)
-            ),
+            description=self.generate_image_chrono_bar(),
         )
         embed.set_author(
             name=f"{self.username} (via Apex Mage)",
@@ -1214,9 +1194,7 @@ class MultiImageCarouselView(discord.ui.View):
         self.embed_image = await create_file_from_image(self.files[self.current_index])
 
         if self.embed:
-            self.embed.description = self.generate_image_chrono_bar(
-                self.current_index, len(self.files)
-            )
+            self.embed.description = self.generate_image_chrono_bar()
             self.embed.set_image(url=f"attachment://{self.embed_image.filename}")
 
         self.update_buttons()
