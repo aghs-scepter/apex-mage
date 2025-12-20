@@ -2,7 +2,6 @@
 
 import base64
 import io
-from unittest.mock import patch
 
 import pytest
 from PIL import Image
@@ -213,14 +212,16 @@ class TestCreateCompositeThumbnail:
         return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
     def test_single_image_returns_resized_thumbnail(self, square_image_b64):
-        """Single image should return a resized thumbnail."""
+        """Single image should return a resized thumbnail with border."""
         result = create_composite_thumbnail([square_image_b64])
 
         # Decode and check dimensions
         decoded = base64.b64decode(result)
         img = Image.open(io.BytesIO(decoded))
 
-        assert img.size == (384, 512)
+        # Default: 435px width + 4px border on each side = 443px
+        # Default: 512px height + 4px border on each side = 520px
+        assert img.size == (443, 520)
         assert img.format == "JPEG"
 
     def test_two_images_returns_horizontal_strip(
@@ -233,8 +234,9 @@ class TestCreateCompositeThumbnail:
         decoded = base64.b64decode(result)
         img = Image.open(io.BytesIO(decoded))
 
-        # 2 images x 384 width = 768 total width
-        assert img.size == (768, 512)
+        # 2 images x 443px (435 + 8 border) = 886 total width
+        # Height: 520px (512 + 8 border)
+        assert img.size == (886, 520)
         assert img.format == "JPEG"
 
     def test_three_images_returns_horizontal_strip(
@@ -249,8 +251,9 @@ class TestCreateCompositeThumbnail:
         decoded = base64.b64decode(result)
         img = Image.open(io.BytesIO(decoded))
 
-        # 3 images x 384 width = 1152 total width
-        assert img.size == (1152, 512)
+        # 3 images x 443px (435 + 8 border) = 1329 total width
+        # Height: 520px (512 + 8 border)
+        assert img.size == (1329, 520)
         assert img.format == "JPEG"
 
     def test_empty_list_raises_value_error(self):
@@ -267,31 +270,32 @@ class TestCreateCompositeThumbnail:
         decoded = base64.b64decode(result)
         img = Image.open(io.BytesIO(decoded))
 
-        assert img.size == (192, 256)
+        # Custom dimensions with default 4px border: (192 + 8, 256 + 8)
+        assert img.size == (200, 264)
 
     def test_center_crops_wide_image(self, wide_image_b64):
         """Wide images should be center-cropped (sides removed)."""
-        # The function should crop a wide 400x200 image to 3:4 ratio
-        # then resize to 384x512
+        # The function should crop a wide 400x200 image to ~85:100 ratio
+        # then resize to 435x512, then add 4px border
         result = create_composite_thumbnail([wide_image_b64])
 
         decoded = base64.b64decode(result)
         img = Image.open(io.BytesIO(decoded))
 
-        # Result should have correct dimensions
-        assert img.size == (384, 512)
+        # Result should have correct dimensions (435 + 8, 512 + 8)
+        assert img.size == (443, 520)
 
     def test_center_crops_tall_image(self, tall_image_b64):
         """Tall images should be center-cropped (top/bottom removed)."""
-        # The function should crop a tall 200x400 image to 3:4 ratio
-        # then resize to 384x512
+        # The function should crop a tall 200x400 image to ~85:100 ratio
+        # then resize to 435x512, then add 4px border
         result = create_composite_thumbnail([tall_image_b64])
 
         decoded = base64.b64decode(result)
         img = Image.open(io.BytesIO(decoded))
 
-        # Result should have correct dimensions
-        assert img.size == (384, 512)
+        # Result should have correct dimensions (435 + 8, 512 + 8)
+        assert img.size == (443, 520)
 
     def test_handles_rgba_images(self):
         """Should handle RGBA images by converting to RGB."""

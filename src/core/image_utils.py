@@ -10,7 +10,7 @@ import io
 from typing import cast
 from uuid import uuid4
 
-from PIL import Image
+from PIL import Image, ImageOps
 from PIL.Image import Image as PILImage
 
 
@@ -29,7 +29,7 @@ def image_strip_headers(image_data: str, file_extension: str) -> str:
     """
     header_prefix = f"data:image/{file_extension};base64,"
     if image_data.startswith(header_prefix):
-        return image_data[len(header_prefix):]
+        return image_data[len(header_prefix) :]
     return image_data
 
 
@@ -122,14 +122,18 @@ def format_image_response(
 def create_composite_thumbnail(
     images: list[str],
     thumb_height: int = 512,
-    thumb_width: int = 384,
+    thumb_width: int = 435,
+    border_width: int = 4,
+    border_color: tuple[int, int, int] = (51, 51, 51),
 ) -> str:
     """Create a horizontal strip composite of multiple images.
 
     Args:
         images: List of base64-encoded image strings (1-3 images).
         thumb_height: Height of each thumbnail in pixels (default 512).
-        thumb_width: Width of each thumbnail in pixels (default 384, which is 3/4 of 512).
+        thumb_width: Width of each thumbnail in pixels (default 435, which is 85% of 512).
+        border_width: Width of border around each thumbnail in pixels (default 4).
+        border_color: RGB color tuple for border (default dark gray #333333).
 
     Returns:
         Base64-encoded composite image string (JPEG format).
@@ -138,12 +142,13 @@ def create_composite_thumbnail(
         ValueError: If images list is empty.
 
     Notes:
-        - Single image: Returns resized/cropped thumbnail of that image
-        - Multiple images: Returns horizontal strip (e.g., 768px or 1152px wide
-          for 2-3 images)
+        - Single image: Returns resized/cropped thumbnail of that image with border
+        - Multiple images: Returns horizontal strip with borders around each image
         - Images are center-cropped to fit the thumbnail dimensions
           (equal amount cut from both sides for wide images, top/bottom for
           tall images)
+        - Each thumbnail has a border added, so final width per image is
+          thumb_width + (2 * border_width)
     """
     if not images:
         raise ValueError("images list cannot be empty")
@@ -187,15 +192,25 @@ def create_composite_thumbnail(
         thumbnail = cropped.resize(
             (thumb_width, thumb_height), Image.Resampling.LANCZOS
         )
-        thumbnails.append(thumbnail)
+
+        # Add border around the thumbnail
+        thumbnail_with_border = ImageOps.expand(
+            thumbnail, border=border_width, fill=border_color
+        )
+        thumbnails.append(thumbnail_with_border)
+
+    # Calculate dimensions with borders
+    # Each thumbnail is now (thumb_width + 2*border_width) x (thumb_height + 2*border_width)
+    bordered_width = thumb_width + 2 * border_width
+    bordered_height = thumb_height + 2 * border_width
 
     # Create composite canvas
-    total_width = thumb_width * len(thumbnails)
-    composite = Image.new("RGB", (total_width, thumb_height))
+    total_width = bordered_width * len(thumbnails)
+    composite = Image.new("RGB", (total_width, bordered_height))
 
     # Paste thumbnails side by side
     for i, thumbnail in enumerate(thumbnails):
-        composite.paste(thumbnail, (i * thumb_width, 0))
+        composite.paste(thumbnail, (i * bordered_width, 0))
 
     # Save to BytesIO buffer as JPEG
     buffer = io.BytesIO()
