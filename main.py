@@ -9,6 +9,7 @@ from src.clients.discord import (
     DiscordBot,
     create_bot,
     register_chat_commands,
+    register_global_checks,
     register_image_commands,
 )
 from src.core.health import (
@@ -142,9 +143,10 @@ async def main() -> None:
     """Initialize and start the Discord bot with health monitoring."""
     bot = create_bot()
 
-    # Register command handlers
+    # Register command handlers and global checks
     register_chat_commands(bot)
     register_image_commands(bot)
+    register_global_checks(bot)
 
     # Create health checker (checks will work once bot is initialized)
     health_checker = create_health_checker(bot)
