@@ -616,6 +616,9 @@ class ImageEditTypeView(discord.ui.View):
             Callable[[discord.Interaction, str, str], Coroutine[Any, Any, None]] | None
         ) = None,
         image_data_list: list[dict[str, str]] | None = None,
+        on_back: (
+            Callable[[discord.Interaction], Coroutine[Any, Any, None]] | None
+        ) = None,
     ) -> None:
         super().__init__()
         self.image_data = image_data
@@ -625,6 +628,7 @@ class ImageEditTypeView(discord.ui.View):
         self.embed: discord.Embed | None = None
         self.message = message
         self.on_select = on_select
+        self.on_back = on_back
         logger.debug("view_initialized", view="ImageEditTypeView")
 
     async def initialize(self, interaction: discord.Interaction) -> None:
@@ -1052,26 +1056,34 @@ class MultiImageCarouselView(discord.ui.View):
     def generate_image_chrono_bar(self, current_index: int, total: int) -> str:
         """Generate a visual position indicator for the carousel.
 
-        Uses bracket notation to show position and selection status:
-        - Current + selected: 【✓】
-        - Current + unselected: 【 】
-        - Other + selected: [✓]
-        - Other + unselected: [ ]
-        """
-        bar_icons = ""
-        for i in range(total):
-            is_current = i == current_index
-            is_selected = i in self.selected_indices
+        Uses two-line display format:
+        - Position line: filled circle for current, empty circle for others
+        - Selected line: checkmark for selected, middle dot for unselected
 
-            if is_current and is_selected:
-                bar_icons += "【✓】"
-            elif is_current and not is_selected:
-                bar_icons += "【 】"
-            elif not is_current and is_selected:
-                bar_icons += "[✓]"
+        Example (viewing image 1, images 1 and 2 selected of 4 total):
+            Position:  ● ○ ○ ○
+            Selected:  ✓ ✓ · ·
+        """
+        position_symbols = []
+        selected_symbols = []
+
+        for i in range(total):
+            # Position indicator: filled circle for current, empty for others
+            if i == current_index:
+                position_symbols.append("●")  # Black circle (U+25CF)
             else:
-                bar_icons += "[ ]"
-        return f"(Newest) {bar_icons} (Oldest)"
+                position_symbols.append("○")  # White circle (U+25CB)
+
+            # Selection indicator: checkmark for selected, middle dot for unselected
+            if i in self.selected_indices:
+                selected_symbols.append("✓")  # Checkmark (U+2713)
+            else:
+                selected_symbols.append("·")  # Middle dot (U+00B7)
+
+        position_line = "Position:  " + " ".join(position_symbols)
+        selected_line = "Selected:  " + " ".join(selected_symbols)
+
+        return f"{position_line}\n{selected_line}"
 
     def generate_selection_status(self) -> str:
         """Generate a status string showing selected images."""
