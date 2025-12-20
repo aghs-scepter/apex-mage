@@ -1085,12 +1085,12 @@ class MultiImageCarouselView(discord.ui.View):
         """Generate a visual position indicator for the carousel.
 
         Uses two-line display format:
-        - Position line: filled circle for current, empty circle for others
-        - Selected line: filled circle for selected, ring operator for unselected
+        - Position line: temporal labels with filled circle for current, empty for others
+        - Selection line: filled circle for selected, ring for unselected (aligned)
 
-        Example (viewing image 1, images 1 and 2 selected of 4 total):
-            Position:  ● ○ ○ ○
-            Selected:  ● ● ∘ ∘
+        Example (viewing image 2, images 1 and 2 selected of 4 total):
+            (Newest) ○ ● ○ ○ (Oldest)
+                     ● ● ∘ ∘
         """
         position_symbols = []
         selected_symbols = []
@@ -1108,8 +1108,9 @@ class MultiImageCarouselView(discord.ui.View):
             else:
                 selected_symbols.append("∘")  # Ring operator (U+2218)
 
-        position_line = "Position:  " + " ".join(position_symbols)
-        selected_line = "Selected:  " + " ".join(selected_symbols)
+        position_line = "(Newest) " + " ".join(position_symbols) + " (Oldest)"
+        # Add 9 spaces to align selection symbols under position symbols
+        selected_line = "         " + " ".join(selected_symbols)
 
         return f"{position_line}\n{selected_line}"
 
@@ -1151,11 +1152,6 @@ class MultiImageCarouselView(discord.ui.View):
             name=f"{self.username} (via Apex Mage)",
             url="https://github.com/aghs-scepter/apex-mage",
             icon_url=self.pfp,
-        )
-        embed.add_field(
-            name="Selection",
-            value=self.generate_selection_status(),
-            inline=False,
         )
         embed.set_image(url=f"attachment://{embed_image.filename}")
 
@@ -1218,13 +1214,6 @@ class MultiImageCarouselView(discord.ui.View):
                 self.current_index, len(self.files)
             )
             self.embed.set_image(url=f"attachment://{self.embed_image.filename}")
-            # Update selection field
-            self.embed.clear_fields()
-            self.embed.add_field(
-                name="Selection",
-                value=self.generate_selection_status(),
-                inline=False,
-            )
 
         self.update_buttons()
 
