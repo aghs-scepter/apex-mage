@@ -610,7 +610,7 @@ class BehaviorPresetGroup(app_commands.Group):
         is_creator = interaction.user.name == preset["created_by"]
         is_admin = (
             hasattr(interaction.user, "guild_permissions")
-            and interaction.user.guild_permissions.administrator  # type: ignore[union-attr]
+            and interaction.user.guild_permissions.administrator
         )
 
         if not (is_bot_owner or is_creator or is_admin):
