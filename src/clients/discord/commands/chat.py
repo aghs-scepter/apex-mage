@@ -213,9 +213,7 @@ class SetBehaviorGroup(app_commands.Group):
                             description=f"Preset `{preset_name}` not found.",
                             is_error=True,
                         )
-                        await select_interaction.followup.send(
-                            embed=error_view.embed, view=error_view
-                        )
+                        await error_view.initialize(select_interaction)
                         return
 
                     prompt_text = preset["prompt_text"]
@@ -255,9 +253,7 @@ class SetBehaviorGroup(app_commands.Group):
                     description="An error occurred while applying the preset.",
                     is_error=True,
                 )
-                await select_interaction.followup.send(
-                    embed=error_view.embed, view=error_view
-                )
+                await error_view.initialize(select_interaction)
 
         # Show the preset selection view
         preset_view = PresetSelectView(

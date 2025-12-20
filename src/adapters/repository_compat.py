@@ -450,3 +450,30 @@ class RepositoryAdapter:
             performed_by: The username of the person performing the unban.
         """
         await self._repo.remove_ban(username, performed_by)
+
+    # =========================================================================
+    # Preset Management Methods
+    # =========================================================================
+
+    async def list_presets(self, guild_id: str) -> list[dict[str, Any]]:
+        """List all behavior presets for a guild.
+
+        Args:
+            guild_id: The Discord guild ID.
+
+        Returns:
+            List of presets as dictionaries, ordered by name.
+        """
+        return await self._repo.list_presets(guild_id)
+
+    async def get_preset(self, guild_id: str, name: str) -> dict[str, Any] | None:
+        """Get a specific behavior preset by guild and name.
+
+        Args:
+            guild_id: The Discord guild ID.
+            name: The preset name.
+
+        Returns:
+            The preset as a dictionary, or None if not found.
+        """
+        return await self._repo.get_preset(guild_id, name)
