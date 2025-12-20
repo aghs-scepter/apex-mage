@@ -1114,16 +1114,6 @@ class MultiImageCarouselView(discord.ui.View):
 
         return f"{position_line}\n{selected_line}"
 
-    def generate_selection_status(self) -> str:
-        """Generate a status string showing selected images."""
-        count = len(self.selected_indices)
-        if count == 0:
-            return "No images selected"
-
-        # Generate labels for selected images (1-indexed for user display)
-        labels = [f"Image {i + 1}" for i in self.selected_indices]
-        return f"Selected ({count}/{self.MAX_SELECTIONS}): " + ", ".join(labels)
-
     async def create_error_embed(
         self, interaction: discord.Interaction, error_message: str
     ) -> tuple[discord.Embed, None]:
