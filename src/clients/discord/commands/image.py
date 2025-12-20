@@ -365,25 +365,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
 
             await edit_interaction.response.defer()
 
-            # Use first selected image for the processing preview
-            preview_image = selected_images[0] if selected_images else None
-            num_images = len(selected_images) if selected_images else 0
-            image_count_text = f" ({num_images} image{'s' if num_images != 1 else ''})"
-
-            processing_message = (
-                f"Modifying your image{image_count_text}... "
-                "(This may take up to 180 seconds)"
-            )
-            processing_view = InfoEmbedView(
-                message=interaction.message,
-                user=embed_user,
-                title="Image modification in progress",
-                description=processing_message,
-                is_error=False,
-                image_data=preview_image,
-            )
-            await processing_view.initialize(edit_interaction)
-
+            # ImageEditPerformView now handles the processing embed with composite thumbnail
             if edit_interaction.message is None or not selected_images:
                 raise RuntimeError("Message or selected_images is None/empty")
             perform_view = ImageEditPerformView(
@@ -416,12 +398,13 @@ def register_image_commands(bot: "DiscordBot") -> None:
 
             selected_images = image_data_list
 
-            # Use first selected image for the edit type preview
+            # Pass all selected images for composite thumbnail display
             edit_type_view = ImageEditTypeView(
                 image_data=selected_images[0],
                 user=embed_user,
                 message=img_interaction.message,
                 on_select=on_edit_type_selected,
+                image_data_list=selected_images,
             )
             await edit_type_view.initialize(img_interaction)
 

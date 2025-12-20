@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING, Any
 
 import discord
 
-from src.core.image_utils import compress_image, image_strip_headers
+from src.core.image_utils import (
+    compress_image,
+    create_composite_thumbnail,
+    image_strip_headers,
+)
 from src.core.logging import get_logger
 from src.core.providers import ImageModifyRequest
 
@@ -597,7 +601,11 @@ class ImageCarouselView(discord.ui.View):
 
 
 class ImageEditTypeView(discord.ui.View):
-    """A view that displays buttons for different image editing options."""
+    """A view that displays buttons for different image editing options.
+
+    Supports both single-image and multi-image display. When image_data_list
+    contains 2+ images, displays a composite thumbnail instead of a single image.
+    """
 
     def __init__(
         self,
@@ -607,9 +615,11 @@ class ImageEditTypeView(discord.ui.View):
         on_select: (
             Callable[[discord.Interaction, str, str], Coroutine[Any, Any, None]] | None
         ) = None,
+        image_data_list: list[dict[str, str]] | None = None,
     ) -> None:
         super().__init__()
         self.image_data = image_data
+        self.image_data_list = image_data_list or [image_data]
         self.user = user
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.embed: discord.Embed | None = None
@@ -618,9 +628,16 @@ class ImageEditTypeView(discord.ui.View):
         logger.debug("view_initialized", view="ImageEditTypeView")
 
     async def initialize(self, interaction: discord.Interaction) -> None:
-        """Initialize the view with the image and buttons."""
+        """Initialize the view with the image and buttons.
+
+        If multiple images are selected, displays a composite thumbnail.
+        Otherwise displays the single selected image.
+        """
+        num_images = len(self.image_data_list)
+        title = "Edit Image" if num_images == 1 else f"Edit Images ({num_images})"
+
         self.embed = discord.Embed(
-            title="Edit Image", description="Select an editing option:"
+            title=title, description="Select an editing option:"
         )
         self.embed.set_author(
             name=f"{self.username} (via Apex Mage)",
@@ -628,7 +645,17 @@ class ImageEditTypeView(discord.ui.View):
             icon_url=self.pfp,
         )
 
-        embed_image = await create_file_from_image(self.image_data)
+        # Create thumbnail: composite for 2+ images, single for 1 image
+        if num_images > 1:
+            image_strings = [img["image"] for img in self.image_data_list]
+            composite_b64 = await asyncio.to_thread(
+                create_composite_thumbnail, image_strings
+            )
+            display_image_data = {"filename": "composite.jpeg", "image": composite_b64}
+        else:
+            display_image_data = self.image_data
+
+        embed_image = await create_file_from_image(display_image_data)
         self.embed.set_image(url=f"attachment://{embed_image.filename}")
 
         if self.message:
@@ -806,7 +833,47 @@ class ImageEditPerformView(discord.ui.View):
         self.embed: discord.Embed | None = None
 
     async def initialize(self, interaction: discord.Interaction) -> None:
-        """Create and display the initial 'processing' embed."""
+        """Create and display the initial 'processing' embed.
+
+        If multiple images are selected, displays a composite thumbnail.
+        Otherwise displays the single selected image.
+        """
+        num_images = len(self.image_data_list)
+        image_count_text = f" ({num_images} image{'s' if num_images != 1 else ''})"
+
+        self.embed = discord.Embed(
+            title="Image modification in progress",
+            description=(
+                f"Modifying your image{image_count_text}... "
+                "(This may take up to 180 seconds)"
+            ),
+            color=EMBED_COLOR_INFO,
+        )
+        self.embed.set_author(
+            name=f"{self.username} (via Apex Mage)",
+            url="https://github.com/aghs-scepter/apex-mage",
+            icon_url=self.pfp,
+        )
+
+        # Create thumbnail: composite for 2+ images, single for 1 image
+        if num_images > 1:
+            image_strings = [img["image"] for img in self.image_data_list]
+            composite_b64 = await asyncio.to_thread(
+                create_composite_thumbnail, image_strings
+            )
+            display_image_data = {"filename": "composite.jpeg", "image": composite_b64}
+        else:
+            display_image_data = self.image_data
+
+        embed_image = await create_file_from_image(display_image_data)
+        self.embed.set_thumbnail(url=f"attachment://{embed_image.filename}")
+
+        await self.message.edit(
+            embed=self.embed,
+            attachments=[embed_image],
+            view=self,
+        )
+
         await self.perform_edit(self.prompt)
 
     async def on_timeout(self) -> None:
