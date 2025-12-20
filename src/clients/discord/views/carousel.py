@@ -1086,11 +1086,11 @@ class MultiImageCarouselView(discord.ui.View):
 
         Uses two-line display format:
         - Position line: filled circle for current, empty circle for others
-        - Selected line: checkmark for selected, middle dot for unselected
+        - Selected line: filled circle for selected, ring operator for unselected
 
         Example (viewing image 1, images 1 and 2 selected of 4 total):
             Position:  ● ○ ○ ○
-            Selected:  ✓ ✓ · ·
+            Selected:  ● ● ∘ ∘
         """
         position_symbols = []
         selected_symbols = []
@@ -1102,11 +1102,11 @@ class MultiImageCarouselView(discord.ui.View):
             else:
                 position_symbols.append("○")  # White circle (U+25CB)
 
-            # Selection indicator: checkmark for selected, middle dot for unselected
+            # Selection indicator: filled circle for selected, ring for unselected
             if i in self.selected_indices:
-                selected_symbols.append("✓")  # Checkmark (U+2713)
+                selected_symbols.append("●")  # Black circle (U+25CF)
             else:
-                selected_symbols.append("·")  # Middle dot (U+00B7)
+                selected_symbols.append("∘")  # Ring operator (U+2218)
 
         position_line = "Position:  " + " ".join(position_symbols)
         selected_line = "Selected:  " + " ".join(selected_symbols)
