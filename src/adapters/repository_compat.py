@@ -400,3 +400,53 @@ class RepositoryAdapter:
             "message_images": json.dumps(images_data) if images_data else "[]",
             "message_timestamp": message.timestamp,
         }
+
+    # =========================================================================
+    # Ban Management Methods
+    # =========================================================================
+
+    async def is_user_banned(self, username: str) -> bool:
+        """Check if a user is banned.
+
+        Args:
+            username: The Discord username to check.
+
+        Returns:
+            True if the user is banned, False otherwise.
+        """
+        return await self._repo.is_user_banned(username)
+
+    async def get_ban_reason(self, username: str) -> str | None:
+        """Get the ban reason for a user.
+
+        Args:
+            username: The Discord username to check.
+
+        Returns:
+            The ban reason if the user is banned, None otherwise.
+        """
+        return await self._repo.get_ban_reason(username)
+
+    async def add_ban(
+        self,
+        username: str,
+        reason: str,
+        performed_by: str,
+    ) -> None:
+        """Add a ban for a user.
+
+        Args:
+            username: The Discord username to ban.
+            reason: The reason for the ban.
+            performed_by: The username of the person performing the ban.
+        """
+        await self._repo.add_ban(username, reason, performed_by)
+
+    async def remove_ban(self, username: str, performed_by: str) -> None:
+        """Remove a ban for a user.
+
+        Args:
+            username: The Discord username to unban.
+            performed_by: The username of the person performing the unban.
+        """
+        await self._repo.remove_ban(username, performed_by)
