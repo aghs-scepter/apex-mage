@@ -364,8 +364,14 @@ class SQLiteRepository:
         logger.debug("Database connection established and schema initialized")
 
     def _connect_sync(self) -> sqlite3.Connection:
-        """Synchronous connection setup."""
-        conn = sqlite3.connect(self._db_path)
+        """Synchronous connection setup.
+
+        Note: check_same_thread=False is required because we use asyncio.to_thread()
+        to run synchronous SQLite operations. The connection is created in one thread
+        but may be used from different thread pool workers. This is safe as long as
+        we don't have concurrent writes (our async wrapper ensures sequential access).
+        """
+        conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
