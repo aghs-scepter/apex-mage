@@ -1090,7 +1090,7 @@ class MultiImageCarouselView(discord.ui.View):
 
         Example (viewing image 2, images 1 and 2 selected of 4 total):
             (Newest) ○ ● ○ ○ (Oldest)
-                     ✓ ✓ ∘ ∘
+            Selected: ✓ ✓ ∘ ∘
         """
         position_symbols = []
         selected_symbols = []
@@ -1109,8 +1109,8 @@ class MultiImageCarouselView(discord.ui.View):
                 selected_symbols.append("∘")  # Ring operator (U+2218)
 
         position_line = "(Newest) " + " ".join(position_symbols) + " (Oldest)"
-        # Add 9 spaces to align selection symbols under position symbols
-        selected_line = "         " + " ".join(selected_symbols)
+        # Use "Selected:" label for alignment (Discord strips leading whitespace)
+        selected_line = "Selected: " + " ".join(selected_symbols)
 
         return f"{position_line}\n{selected_line}"
 
