@@ -265,6 +265,113 @@ class SetBehaviorGroup(app_commands.Group):
         await preset_view.initialize(interaction)
 
 
+class BehaviorPresetGroup(app_commands.Group):
+    """Command group for managing behavior presets."""
+
+    def __init__(self, bot: "DiscordBot") -> None:
+        """Initialize the behavior_preset command group.
+
+        Args:
+            bot: The Discord bot instance.
+        """
+        super().__init__(name="behavior_preset", description="Manage behavior presets")
+        self.bot = bot
+
+    @app_commands.command(name="edit", description="Edit an existing behavior preset")
+    @app_commands.describe(
+        name="Name of the preset to edit",
+        description="New description (optional)",
+        prompt="New prompt text (optional)",
+    )
+    async def edit(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        description: str | None = None,
+        prompt: str | None = None,
+    ) -> None:
+        """Edit an existing behavior preset.
+
+        Only the bot owner (aghs), preset creator, or server admins can edit.
+
+        Args:
+            interaction: The Discord interaction.
+            name: Name of the preset to edit.
+            description: New description (optional).
+            prompt: New prompt text (optional).
+        """
+        # Check guild context
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.",
+                ephemeral=True,
+            )
+            return
+
+        guild_id = str(interaction.guild_id)
+
+        # Fetch preset to verify it exists and get created_by
+        preset = await self.bot.repo.get_preset(guild_id, name)
+
+        if preset is None:
+            await interaction.response.send_message(
+                f"Preset `{name}` not found.",
+                ephemeral=True,
+            )
+            return
+
+        # Permission check: bot owner OR creator OR server admin
+        is_bot_owner = interaction.user.name == "aghs"
+        is_creator = interaction.user.name == preset["created_by"]
+        is_admin = (
+            hasattr(interaction.user, "guild_permissions")
+            and interaction.user.guild_permissions.administrator
+        )
+
+        if not (is_bot_owner or is_creator or is_admin):
+            await interaction.response.send_message(
+                "You don't have permission to edit this preset. "
+                "Only the bot owner, preset creator, or server admins can edit presets.",
+                ephemeral=True,
+            )
+            return
+
+        # Check if at least one field is provided
+        if description is None and prompt is None:
+            await interaction.response.send_message(
+                "Please provide at least one field to update (description or prompt).",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        # Update the preset
+        await self.bot.repo.update_preset(guild_id, name, description, prompt)
+
+        embed_user = create_embed_user(interaction)
+
+        # Build update notes
+        update_notes = [{"name": "Preset", "value": name}]
+        if description is not None:
+            update_notes.append({"name": "New Description", "value": description})
+        if prompt is not None:
+            display_prompt, _ = await handle_text_overflow(
+                self.bot, "prompt", prompt, interaction.channel_id or 0
+            )
+            update_notes.append({"name": "New Prompt", "value": display_prompt})
+
+        info_view = InfoEmbedView(
+            message=interaction.message,
+            user=embed_user,
+            title="Preset Updated",
+            description=f"Behavior preset `{name}` has been updated.",
+            is_error=False,
+            notes=update_notes,
+        )
+        await info_view.initialize(interaction)
+
+
 def _convert_context_to_messages(
     context: list[dict[str, Any]],
 ) -> tuple[list[ChatMessage], str | None]:
@@ -542,6 +649,9 @@ def register_chat_commands(bot: "DiscordBot") -> None:
 
     # Register the set_behavior command group
     bot.tree.add_command(SetBehaviorGroup(bot))
+
+    # Register the behavior_preset command group
+    bot.tree.add_command(BehaviorPresetGroup(bot))
 
     @bot.tree.command()  # type: ignore[arg-type]
     @app_commands.describe()

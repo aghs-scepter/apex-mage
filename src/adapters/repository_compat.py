@@ -477,3 +477,59 @@ class RepositoryAdapter:
             The preset as a dictionary, or None if not found.
         """
         return await self._repo.get_preset(guild_id, name)
+
+    async def count_presets(self, guild_id: str) -> int:
+        """Count the number of presets for a guild.
+
+        Args:
+            guild_id: The Discord guild ID.
+
+        Returns:
+            The number of presets in the guild.
+        """
+        return await self._repo.count_presets(guild_id)
+
+    async def create_preset(
+        self,
+        guild_id: str,
+        name: str,
+        description: str,
+        prompt_text: str,
+        created_by: str,
+    ) -> None:
+        """Create a new behavior preset.
+
+        Args:
+            guild_id: The Discord guild ID.
+            name: The preset name (must be unique within guild).
+            description: A brief description of the preset.
+            prompt_text: The full behavior prompt text.
+            created_by: The Discord username who created the preset.
+        """
+        await self._repo.create_preset(guild_id, name, description, prompt_text, created_by)
+
+    async def update_preset(
+        self,
+        guild_id: str,
+        name: str,
+        description: str | None = None,
+        prompt_text: str | None = None,
+    ) -> None:
+        """Update an existing behavior preset.
+
+        Args:
+            guild_id: The Discord guild ID.
+            name: The preset name to update.
+            description: New description (optional, None keeps existing).
+            prompt_text: New prompt text (optional, None keeps existing).
+        """
+        await self._repo.update_preset(guild_id, name, description, prompt_text)
+
+    async def delete_preset(self, guild_id: str, name: str) -> None:
+        """Delete a behavior preset.
+
+        Args:
+            guild_id: The Discord guild ID.
+            name: The preset name to delete.
+        """
+        await self._repo.delete_preset(guild_id, name)
