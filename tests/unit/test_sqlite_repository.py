@@ -7,6 +7,8 @@ and RateLimitRepository protocols.
 All tests use an in-memory SQLite database for isolation and speed.
 """
 
+import sqlite3
+
 import pytest
 import pytest_asyncio
 
@@ -1093,3 +1095,159 @@ class TestBanRepository:
         # Different case should NOT be banned (SQLite default is case-sensitive)
         assert await repo.is_user_banned("testuser") is False
         assert await repo.is_user_banned("TESTUSER") is False
+
+
+class TestBehaviorPresetRepository:
+    """Tests for behavior preset repository methods."""
+
+    async def test_create_preset(self, repo: SQLiteRepository) -> None:
+        """Test creating a behavior preset."""
+        await repo.create_preset(
+            guild_id="123456",
+            name="pirate",
+            description="Talk like a pirate",
+            prompt_text="You are a pirate. Speak accordingly.",
+            created_by="user123",
+        )
+
+        preset = await repo.get_preset("123456", "pirate")
+        assert preset is not None
+        assert preset["guild_id"] == "123456"
+        assert preset["name"] == "pirate"
+        assert preset["description"] == "Talk like a pirate"
+        assert preset["prompt_text"] == "You are a pirate. Speak accordingly."
+        assert preset["created_by"] == "user123"
+
+    async def test_get_preset_not_found(self, repo: SQLiteRepository) -> None:
+        """Test getting a non-existent preset returns None."""
+        result = await repo.get_preset("999999", "nonexistent")
+        assert result is None
+
+    async def test_list_presets_empty(self, repo: SQLiteRepository) -> None:
+        """Test listing presets for guild with no presets."""
+        result = await repo.list_presets("999999")
+        assert result == []
+
+    async def test_list_presets_multiple(self, repo: SQLiteRepository) -> None:
+        """Test listing multiple presets for a guild."""
+        await repo.create_preset(
+            "guild1", "beta", "Second preset", "Prompt B", "user1"
+        )
+        await repo.create_preset(
+            "guild1", "alpha", "First preset", "Prompt A", "user2"
+        )
+        await repo.create_preset(
+            "guild2", "other", "Other guild", "Prompt X", "user3"
+        )
+
+        result = await repo.list_presets("guild1")
+        assert len(result) == 2
+        # Should be ordered by name (alpha before beta)
+        assert result[0]["name"] == "alpha"
+        assert result[1]["name"] == "beta"
+
+    async def test_count_presets(self, repo: SQLiteRepository) -> None:
+        """Test counting presets for a guild."""
+        assert await repo.count_presets("guild1") == 0
+
+        await repo.create_preset("guild1", "one", "Desc", "Prompt", "user")
+        assert await repo.count_presets("guild1") == 1
+
+        await repo.create_preset("guild1", "two", "Desc", "Prompt", "user")
+        assert await repo.count_presets("guild1") == 2
+
+        # Different guild should not affect count
+        await repo.create_preset("guild2", "other", "Desc", "Prompt", "user")
+        assert await repo.count_presets("guild1") == 2
+
+    async def test_update_preset_description(self, repo: SQLiteRepository) -> None:
+        """Test updating only the description."""
+        await repo.create_preset(
+            "guild1", "test", "Old desc", "Old prompt", "user"
+        )
+
+        await repo.update_preset("guild1", "test", description="New desc")
+
+        preset = await repo.get_preset("guild1", "test")
+        assert preset is not None
+        assert preset["description"] == "New desc"
+        assert preset["prompt_text"] == "Old prompt"  # Unchanged
+
+    async def test_update_preset_prompt(self, repo: SQLiteRepository) -> None:
+        """Test updating only the prompt text."""
+        await repo.create_preset(
+            "guild1", "test", "Old desc", "Old prompt", "user"
+        )
+
+        await repo.update_preset("guild1", "test", prompt_text="New prompt")
+
+        preset = await repo.get_preset("guild1", "test")
+        assert preset is not None
+        assert preset["description"] == "Old desc"  # Unchanged
+        assert preset["prompt_text"] == "New prompt"
+
+    async def test_update_preset_both(self, repo: SQLiteRepository) -> None:
+        """Test updating both description and prompt."""
+        await repo.create_preset(
+            "guild1", "test", "Old desc", "Old prompt", "user"
+        )
+
+        await repo.update_preset(
+            "guild1", "test", description="New desc", prompt_text="New prompt"
+        )
+
+        preset = await repo.get_preset("guild1", "test")
+        assert preset is not None
+        assert preset["description"] == "New desc"
+        assert preset["prompt_text"] == "New prompt"
+
+    async def test_delete_preset(self, repo: SQLiteRepository) -> None:
+        """Test deleting a preset."""
+        await repo.create_preset("guild1", "test", "Desc", "Prompt", "user")
+        assert await repo.get_preset("guild1", "test") is not None
+
+        await repo.delete_preset("guild1", "test")
+
+        assert await repo.get_preset("guild1", "test") is None
+
+    async def test_delete_preset_nonexistent(self, repo: SQLiteRepository) -> None:
+        """Test deleting a non-existent preset doesn't raise error."""
+        # Should not raise
+        await repo.delete_preset("guild1", "nonexistent")
+
+    async def test_unique_constraint_within_guild(
+        self, repo: SQLiteRepository
+    ) -> None:
+        """Test that preset names must be unique within a guild."""
+        await repo.create_preset("guild1", "test", "First", "Prompt1", "user1")
+
+        # Same name in same guild should raise
+        with pytest.raises(sqlite3.IntegrityError):
+            await repo.create_preset(
+                "guild1", "test", "Second", "Prompt2", "user2"
+            )
+
+    async def test_same_name_different_guilds(self, repo: SQLiteRepository) -> None:
+        """Test that same name can exist in different guilds."""
+        await repo.create_preset("guild1", "common", "Desc1", "Prompt1", "user1")
+        await repo.create_preset("guild2", "common", "Desc2", "Prompt2", "user2")
+
+        preset1 = await repo.get_preset("guild1", "common")
+        preset2 = await repo.get_preset("guild2", "common")
+
+        assert preset1 is not None
+        assert preset2 is not None
+        assert preset1["description"] == "Desc1"
+        assert preset2["description"] == "Desc2"
+
+    async def test_guild_isolation(self, repo: SQLiteRepository) -> None:
+        """Test that guilds cannot see each other's presets."""
+        await repo.create_preset("guild1", "secret", "Guild 1 only", "Prompt", "user")
+
+        # Guild 2 should not see guild 1's preset
+        result = await repo.get_preset("guild2", "secret")
+        assert result is None
+
+        # Guild 2's list should be empty
+        result = await repo.list_presets("guild2")
+        assert result == []
