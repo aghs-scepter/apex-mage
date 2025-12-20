@@ -1,26 +1,30 @@
 """Tests for Discord global checks."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.clients.discord.checks import BanCheckCommandTree, register_global_checks
 
-class TestGlobalBanCheck:
-    """Tests for the global ban check functionality."""
+
+class TestBanCheckCommandTree:
+    """Tests for the BanCheckCommandTree functionality."""
 
     @pytest.fixture
     def mock_bot(self) -> MagicMock:
         """Create a mock Discord bot."""
         bot = MagicMock()
-        bot.tree = MagicMock()
-        bot.tree.interaction_check = MagicMock()
         bot.repo = AsyncMock()
+        # Clear any existing tree reference so we can create a new one
+        bot._connection = MagicMock()
+        bot._connection._command_tree = None
         return bot
 
     @pytest.fixture
-    def mock_interaction(self) -> MagicMock:
+    def mock_interaction(self, mock_bot: MagicMock) -> MagicMock:
         """Create a mock Discord interaction."""
         interaction = MagicMock()
+        interaction.client = mock_bot
         interaction.user = MagicMock()
         interaction.user.name = "testuser"
         interaction.user.id = 123456789
@@ -30,41 +34,26 @@ class TestGlobalBanCheck:
         interaction.response.send_message = AsyncMock()
         return interaction
 
-    def test_register_global_checks_decorates_tree(
-        self, mock_bot: MagicMock
-    ) -> None:
-        """Test that register_global_checks sets up the interaction_check decorator."""
-        from src.clients.discord.checks import register_global_checks
+    @pytest.fixture
+    def command_tree(self, mock_bot: MagicMock) -> BanCheckCommandTree:
+        """Create a BanCheckCommandTree with a mock bot."""
+        with patch.object(BanCheckCommandTree, '__init__', lambda self, client: None):
+            tree = object.__new__(BanCheckCommandTree)
+            return tree
 
+    def test_register_global_checks_is_noop(self, mock_bot: MagicMock) -> None:
+        """Test that register_global_checks is a no-op (kept for backwards compatibility)."""
+        # Should not raise any errors
         register_global_checks(mock_bot)
-
-        # The interaction_check decorator should have been called
-        mock_bot.tree.interaction_check.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_ban_check_allows_non_banned_user(
-        self, mock_bot: MagicMock, mock_interaction: MagicMock
+        self, mock_bot: MagicMock, mock_interaction: MagicMock, command_tree: BanCheckCommandTree
     ) -> None:
         """Test that non-banned users are allowed to use commands."""
-        from src.clients.discord.checks import register_global_checks
-
-        # Set up the mock to capture the check function
-        captured_check = None
-
-        def capture_decorator(func: object) -> object:
-            nonlocal captured_check
-            captured_check = func
-            return func
-
-        mock_bot.tree.interaction_check = capture_decorator
         mock_bot.repo.is_user_banned.return_value = False
 
-        # Register checks to capture the function
-        register_global_checks(mock_bot)
-
-        # Run the captured check
-        assert captured_check is not None
-        result = await captured_check(mock_interaction)
+        result = await command_tree.interaction_check(mock_interaction)
 
         # Should return True (allow command)
         assert result is True
@@ -73,29 +62,13 @@ class TestGlobalBanCheck:
 
     @pytest.mark.asyncio
     async def test_ban_check_blocks_banned_user(
-        self, mock_bot: MagicMock, mock_interaction: MagicMock
+        self, mock_bot: MagicMock, mock_interaction: MagicMock, command_tree: BanCheckCommandTree
     ) -> None:
         """Test that banned users are blocked from using commands."""
-        from src.clients.discord.checks import register_global_checks
-
-        # Set up the mock to capture the check function
-        captured_check = None
-
-        def capture_decorator(func: object) -> object:
-            nonlocal captured_check
-            captured_check = func
-            return func
-
-        mock_bot.tree.interaction_check = capture_decorator
         mock_bot.repo.is_user_banned.return_value = True
         mock_bot.repo.get_ban_reason.return_value = "Spamming"
 
-        # Register checks to capture the function
-        register_global_checks(mock_bot)
-
-        # Run the captured check
-        assert captured_check is not None
-        result = await captured_check(mock_interaction)
+        result = await command_tree.interaction_check(mock_interaction)
 
         # Should return False (block command)
         assert result is False
@@ -110,29 +83,13 @@ class TestGlobalBanCheck:
 
     @pytest.mark.asyncio
     async def test_ban_check_handles_no_reason(
-        self, mock_bot: MagicMock, mock_interaction: MagicMock
+        self, mock_bot: MagicMock, mock_interaction: MagicMock, command_tree: BanCheckCommandTree
     ) -> None:
         """Test that banned users without a reason get a default message."""
-        from src.clients.discord.checks import register_global_checks
-
-        # Set up the mock to capture the check function
-        captured_check = None
-
-        def capture_decorator(func: object) -> object:
-            nonlocal captured_check
-            captured_check = func
-            return func
-
-        mock_bot.tree.interaction_check = capture_decorator
         mock_bot.repo.is_user_banned.return_value = True
         mock_bot.repo.get_ban_reason.return_value = None  # No reason provided
 
-        # Register checks to capture the function
-        register_global_checks(mock_bot)
-
-        # Run the captured check
-        assert captured_check is not None
-        result = await captured_check(mock_interaction)
+        result = await command_tree.interaction_check(mock_interaction)
 
         # Should return False (block command)
         assert result is False
@@ -145,32 +102,16 @@ class TestGlobalBanCheck:
 
     @pytest.mark.asyncio
     async def test_ban_check_uses_username_not_display_name(
-        self, mock_bot: MagicMock, mock_interaction: MagicMock
+        self, mock_bot: MagicMock, mock_interaction: MagicMock, command_tree: BanCheckCommandTree
     ) -> None:
         """Test that the check uses the user's username (not display name)."""
-        from src.clients.discord.checks import register_global_checks
-
-        # Set up the mock to capture the check function
-        captured_check = None
-
-        def capture_decorator(func: object) -> object:
-            nonlocal captured_check
-            captured_check = func
-            return func
-
-        mock_bot.tree.interaction_check = capture_decorator
         mock_bot.repo.is_user_banned.return_value = False
 
         # Set a different display_name vs username
         mock_interaction.user.name = "actual_username"
         mock_interaction.user.display_name = "Fancy Display Name"
 
-        # Register checks to capture the function
-        register_global_checks(mock_bot)
-
-        # Run the captured check
-        assert captured_check is not None
-        await captured_check(mock_interaction)
+        await command_tree.interaction_check(mock_interaction)
 
         # Should use .name, not .display_name
         mock_bot.repo.is_user_banned.assert_called_once_with("actual_username")

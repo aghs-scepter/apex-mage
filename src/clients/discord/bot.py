@@ -4,9 +4,9 @@ from os import getenv
 from typing import TYPE_CHECKING
 
 import discord
-from discord import app_commands
 
 from src.adapters import GCSAdapter, RepositoryAdapter, SQLiteRepository
+from src.clients.discord.checks import BanCheckCommandTree
 from src.core.conversation import ContextBuilder
 from src.core.logging import get_logger
 from src.core.rate_limit import (
@@ -36,7 +36,7 @@ class DiscordBot(discord.Client):
         intents.messages = True
         intents.dm_messages = True
         super().__init__(intents=intents)
-        self.tree = app_commands.CommandTree(self)
+        self.tree = BanCheckCommandTree(self)
         self._repository: SQLiteRepository | None = None
         self._repo_adapter: RepositoryAdapter | None = None
         self._ai_provider: AIProvider | None = None

@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING
 
 import discord
+from discord import app_commands
 
 from src.core.logging import get_logger
 
@@ -12,17 +13,14 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def register_global_checks(bot: "DiscordBot") -> None:
-    """Register global interaction checks with the bot.
+class BanCheckCommandTree(app_commands.CommandTree["DiscordBot"]):
+    """Custom CommandTree that enforces global ban checks on all interactions.
 
-    This sets up checks that run before every slash command.
-
-    Args:
-        bot: The Discord bot instance.
+    This subclass overrides interaction_check to verify users are not banned
+    before allowing any slash command to execute.
     """
 
-    @bot.tree.interaction_check  # type: ignore[arg-type]
-    async def global_ban_check(interaction: discord.Interaction["DiscordBot"]) -> bool:
+    async def interaction_check(self, interaction: discord.Interaction["DiscordBot"]) -> bool:
         """Check if the user is banned before allowing command execution.
 
         If the user is banned, sends a visible (non-ephemeral) message
@@ -35,6 +33,8 @@ def register_global_checks(bot: "DiscordBot") -> None:
             True if the user is not banned and can proceed,
             False if the user is banned.
         """
+        # Get the bot instance from the client
+        bot = interaction.client
         username = interaction.user.name
 
         # Check if user is banned
@@ -62,3 +62,18 @@ def register_global_checks(bot: "DiscordBot") -> None:
             return False
 
         return True
+
+
+def register_global_checks(bot: "DiscordBot") -> None:
+    """Register global interaction checks with the bot.
+
+    Note: This function is now a no-op since the ban check is implemented
+    directly in BanCheckCommandTree.interaction_check. It is kept for
+    backwards compatibility and to allow future additional checks.
+
+    Args:
+        bot: The Discord bot instance.
+    """
+    # Ban check is now handled by BanCheckCommandTree.interaction_check
+    # This function is kept for backwards compatibility
+    pass
