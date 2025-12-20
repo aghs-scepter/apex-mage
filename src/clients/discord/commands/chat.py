@@ -481,6 +481,64 @@ class BehaviorPresetGroup(app_commands.Group):
         )
         await info_view.initialize(interaction)
 
+    @app_commands.command(name="list", description="List all behavior presets for this server")
+    async def list_presets(self, interaction: discord.Interaction) -> None:
+        """List all behavior presets for the current guild.
+
+        Args:
+            interaction: The Discord interaction.
+        """
+        # Check guild context
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        guild_id = str(interaction.guild_id)
+        embed_user = create_embed_user(interaction)
+
+        # Fetch presets for this guild
+        presets = await self.bot.repo.list_presets(guild_id)
+
+        # If no presets exist, show a friendly message
+        if not presets:
+            info_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Behavior Presets",
+                description=(
+                    "No behavior presets found for this server.\n\n"
+                    "Create one with `/behavior_preset create`"
+                ),
+                is_error=False,
+            )
+            await info_view.initialize(interaction)
+            return
+
+        # Build embed with preset list
+        embed = discord.Embed(title="Behavior Presets", color=0x3498DB)
+
+        for preset in presets:
+            # Truncate description to ~50 chars for display
+            desc = preset["description"]
+            if len(desc) > 50:
+                desc = desc[:50] + "..."
+            embed.add_field(
+                name=preset["name"],
+                value=f"{desc}\n*Created by: {preset['created_by']}*",
+                inline=False,
+            )
+
+        # Show count
+        count = len(presets)
+        embed.set_footer(text=f"Showing {count}/15 presets")
+
+        await interaction.followup.send(embed=embed)
+
 
 def _convert_context_to_messages(
     context: list[dict[str, Any]],
