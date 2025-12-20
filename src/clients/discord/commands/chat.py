@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import json
+import sqlite3
 from os import getenv
 from typing import TYPE_CHECKING, Any
 
@@ -15,6 +16,7 @@ from src.clients.discord.utils import create_embed_user, handle_text_overflow
 from src.clients.discord.views.carousel import (
     ClearHistoryConfirmationView,
     InfoEmbedView,
+    PresetSelectView,
 )
 from src.core.image_utils import compress_image
 from src.core.providers import ChatMessage
@@ -151,34 +153,120 @@ class SetBehaviorGroup(app_commands.Group):
             await error_view.initialize(interaction)
 
     @app_commands.command(name="preset")
-    @app_commands.describe(name="Name of the saved behavior preset")
     async def preset(
         self,
         interaction: discord.Interaction,
-        name: str,
     ) -> None:
-        """Select a saved behavior preset.
+        """Select a saved behavior preset from a dropdown menu."""
+        assert interaction.guild_id is not None, "Command must be used in a guild"
+        assert interaction.channel_id is not None, "Command must be used in a channel"
 
-        Args:
-            interaction: The Discord interaction.
-            name: The name of the preset to select.
-        """
         await interaction.response.defer()
 
         embed_user = create_embed_user(interaction)
+        channel_id = interaction.channel_id
+        guild_id = str(interaction.guild_id)
 
-        # Placeholder - preset selection will be implemented in a follow-up task
-        info_view = InfoEmbedView(
-            message=interaction.message,
+        # Fetch presets for this guild
+        presets = await self.bot.repo.list_presets(guild_id)
+
+        # If no presets exist, show a friendly message
+        if not presets:
+            info_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="No Presets Available",
+                description=(
+                    "No behavior presets found for this server.\n\n"
+                    "Create one with `/behavior_preset create`"
+                ),
+                is_error=False,
+            )
+            await info_view.initialize(interaction)
+            return
+
+        async def on_preset_selected(
+            select_interaction: discord.Interaction,
+            preset_name: str | None,
+            _prompt_text: str | None,
+        ) -> None:
+            """Handle preset selection callback."""
+            try:
+                await self.bot.repo.create_channel(channel_id)
+
+                if preset_name is None:
+                    # Default selected - clear behavior by setting empty prompt
+                    # This effectively removes the system prompt
+                    await self.bot.repo.add_message(
+                        channel_id, "Anthropic", "behavior", False, ""
+                    )
+                    display_name = "Default"
+                    display_prompt = "(No system prompt - using default AI behavior)"
+                else:
+                    # Get the preset's prompt text
+                    preset = await self.bot.repo.get_preset(guild_id, preset_name)
+                    if preset is None:
+                        error_view = InfoEmbedView(
+                            message=select_interaction.message,
+                            user=embed_user,
+                            title="Error",
+                            description=f"Preset `{preset_name}` not found.",
+                            is_error=True,
+                        )
+                        await select_interaction.followup.send(
+                            embed=error_view.embed, view=error_view
+                        )
+                        return
+
+                    prompt_text = preset["prompt_text"]
+                    await self.bot.repo.add_message(
+                        channel_id, "Anthropic", "behavior", False, prompt_text
+                    )
+                    display_name = preset_name
+                    display_prompt = prompt_text
+
+                # Refresh context
+                await self.bot.repo.get_visible_messages(channel_id, "All Models")
+
+                # Handle text overflow for display
+                display_prompt_truncated, full_prompt_url = await handle_text_overflow(
+                    self.bot, "prompt", display_prompt, channel_id
+                )
+
+                success_notes = [
+                    {"name": "Preset", "value": display_name},
+                    {"name": "Behavior Instructions", "value": display_prompt_truncated},
+                ]
+                success_view = InfoEmbedView(
+                    message=select_interaction.message,
+                    user=embed_user,
+                    title="Behavior Updated",
+                    is_error=False,
+                    notes=success_notes,
+                    full_prompt_url=full_prompt_url,
+                )
+                await success_view.initialize(select_interaction)
+
+            except Exception:
+                error_view = InfoEmbedView(
+                    message=select_interaction.message,
+                    user=embed_user,
+                    title="Error",
+                    description="An error occurred while applying the preset.",
+                    is_error=True,
+                )
+                await select_interaction.followup.send(
+                    embed=error_view.embed, view=error_view
+                )
+
+        # Show the preset selection view
+        preset_view = PresetSelectView(
+            presets=presets,
             user=embed_user,
-            title="Preset Selection",
-            description=(
-                f"Preset selection coming soon. You requested preset: `{name}`\n\n"
-                "For now, use `/set_behavior custom` to set a custom behavior prompt."
-            ),
-            is_error=False,
+            channel_id=channel_id,
+            on_select=on_preset_selected,
         )
-        await info_view.initialize(interaction)
+        await preset_view.initialize(interaction)
 
 
 def _convert_context_to_messages(
@@ -519,3 +607,106 @@ def register_chat_commands(bot: "DiscordBot") -> None:
             on_select=on_clear_selection,
         )
         await confirmation_view.initialize(interaction)
+
+    @bot.tree.command(
+        description="Ban a user from using the bot. Only aghs can use this command."
+    )
+    @app_commands.describe(
+        username="Discord username to ban",
+        reason="Reason for the ban",
+    )
+    async def ban_user(
+        interaction: discord.Interaction,
+        username: str,
+        reason: str,
+    ) -> None:
+        """Ban a user from using the bot. Only aghs can use this command.
+
+        Args:
+            interaction: The Discord interaction.
+            username: The Discord username to ban.
+            reason: The reason for the ban.
+        """
+        # Check if invoker is the bot owner
+        if interaction.user.name != "aghs":
+            await interaction.response.send_message(
+                "Only aghs can ban users.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        embed_user = create_embed_user(interaction)
+
+        try:
+            await bot.repo.add_ban(username, reason, interaction.user.name)
+
+            info_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="User Banned",
+                description=f"User {username} has been banned. Reason: {reason}",
+                is_error=False,
+            )
+            await info_view.initialize(interaction)
+
+        except sqlite3.IntegrityError:
+            # User is already banned
+            info_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Ban User",
+                description=f"User {username} is already banned.",
+                is_error=False,
+            )
+            await info_view.initialize(interaction)
+
+    @bot.tree.command(
+        description="Unban a user from the bot. Only aghs can use this command."
+    )
+    @app_commands.describe(username="Discord username to unban")
+    async def unban_user(interaction: discord.Interaction, username: str) -> None:
+        """Unban a user from the bot. Only aghs can use this command.
+
+        Args:
+            interaction: The Discord interaction.
+            username: The Discord username to unban.
+        """
+        # Check if invoker is the bot owner
+        if interaction.user.name != "aghs":
+            await interaction.response.send_message(
+                "Only aghs can unban users.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        embed_user = create_embed_user(interaction)
+
+        # Check if user is actually banned
+        is_banned = await bot.repo.is_user_banned(username)
+
+        if not is_banned:
+            info_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Unban User",
+                description=f"User {username} is not currently banned.",
+                is_error=False,
+            )
+            await info_view.initialize(interaction)
+            return
+
+        # Remove the ban
+        await bot.repo.remove_ban(username, interaction.user.name)
+
+        info_view = InfoEmbedView(
+            message=interaction.message,
+            user=embed_user,
+            title="User Unbanned",
+            description=f"User {username} has been unbanned.",
+            is_error=False,
+        )
+        await info_view.initialize(interaction)
