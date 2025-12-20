@@ -539,6 +539,231 @@ class BehaviorPresetGroup(app_commands.Group):
 
         await interaction.followup.send(embed=embed)
 
+    async def _preset_name_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        """Autocomplete handler for preset names.
+
+        Args:
+            interaction: The Discord interaction.
+            current: The current input value to filter by.
+
+        Returns:
+            List of matching preset name choices.
+        """
+        if interaction.guild_id is None:
+            return []
+
+        guild_id = str(interaction.guild_id)
+        presets = await self.bot.repo.list_presets(guild_id)
+
+        # Filter presets by current input (case-insensitive)
+        current_lower = current.lower()
+        matching = [
+            app_commands.Choice(name=p["name"], value=p["name"])
+            for p in presets
+            if current_lower in p["name"].lower()
+        ]
+
+        # Discord limits autocomplete to 25 choices
+        return matching[:25]
+
+    @app_commands.command(name="delete", description="Delete a behavior preset")
+    @app_commands.describe(name="Name of the preset to delete")
+    async def delete(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+    ) -> None:
+        """Delete a behavior preset.
+
+        Only the bot owner (aghs), preset creator, or server admins can delete.
+
+        Args:
+            interaction: The Discord interaction.
+            name: Name of the preset to delete.
+        """
+        # Check guild context
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.",
+                ephemeral=True,
+            )
+            return
+
+        guild_id = str(interaction.guild_id)
+
+        # Fetch preset to verify it exists and get created_by
+        preset = await self.bot.repo.get_preset(guild_id, name)
+
+        if preset is None:
+            await interaction.response.send_message(
+                f"Preset '{name}' not found.",
+                ephemeral=True,
+            )
+            return
+
+        # Permission check: bot owner OR creator OR server admin
+        is_bot_owner = interaction.user.name == "aghs"
+        is_creator = interaction.user.name == preset["created_by"]
+        is_admin = (
+            hasattr(interaction.user, "guild_permissions")
+            and interaction.user.guild_permissions.administrator  # type: ignore[union-attr]
+        )
+
+        if not (is_bot_owner or is_creator or is_admin):
+            await interaction.response.send_message(
+                "You don't have permission to delete this preset. "
+                "Only the bot owner, preset creator, or server admins can delete presets.",
+                ephemeral=True,
+            )
+            return
+
+        # Delete the preset
+        await self.bot.repo.delete_preset(guild_id, name)
+
+        await interaction.response.send_message(
+            f"Preset '{name}' has been deleted.",
+        )
+
+    @delete.autocomplete("name")
+    async def delete_name_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        """Autocomplete for the delete command's name parameter."""
+        return await self._preset_name_autocomplete(interaction, current)
+
+    @edit.autocomplete("name")
+    async def edit_name_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        """Autocomplete for the edit command's name parameter."""
+        return await self._preset_name_autocomplete(interaction, current)
+
+    @app_commands.command(name="view", description="View details of a behavior preset")
+    @app_commands.describe(name="Name of the preset to view")
+    async def view(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+    ) -> None:
+        """View the full details of a behavior preset.
+
+        Anyone can view any preset in the server.
+
+        Args:
+            interaction: The Discord interaction.
+            name: Name of the preset to view.
+        """
+        # Check guild context
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.",
+                ephemeral=True,
+            )
+            return
+
+        guild_id = str(interaction.guild_id)
+
+        # Fetch the preset
+        preset = await self.bot.repo.get_preset(guild_id, name)
+
+        if preset is None:
+            await interaction.response.send_message(
+                f"Preset `{name}` not found.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        embed_user = create_embed_user(interaction)
+
+        # Build the embed with preset details
+        embed = discord.Embed(
+            title=f"Preset: {preset['name']}",
+            color=0x3498DB,
+        )
+
+        # Add description field
+        embed.add_field(
+            name="Description",
+            value=preset["description"],
+            inline=False,
+        )
+
+        # Handle long prompt text - truncate if over 1000 characters
+        prompt_text = preset["prompt_text"]
+        full_prompt_url = None
+        if len(prompt_text) > 1000:
+            # Upload full prompt to GCS and truncate display
+            try:
+                display_prompt, full_prompt_url = await handle_text_overflow(
+                    self.bot, "prompt", prompt_text, interaction.channel_id or 0
+                )
+            except Exception:
+                # If upload fails, just truncate
+                display_prompt = prompt_text[:1000] + "...\n*(truncated)*"
+        else:
+            display_prompt = prompt_text
+
+        embed.add_field(
+            name="Prompt",
+            value=display_prompt,
+            inline=False,
+        )
+
+        # Add metadata fields
+        embed.add_field(
+            name="Created By",
+            value=preset["created_by"],
+            inline=True,
+        )
+        embed.add_field(
+            name="Created At",
+            value=preset["created_at"],
+            inline=True,
+        )
+
+        # Set footer with user info
+        avatar = embed_user.get("pfp")
+        if avatar is not None:
+            embed.set_footer(
+                text=f"Requested by {embed_user['name']}",
+                icon_url=avatar,
+            )
+        else:
+            embed.set_footer(text=f"Requested by {embed_user['name']}")
+
+        # If we have a full prompt URL, add a button to view it
+        if full_prompt_url:
+            button_view = discord.ui.View()
+            button_view.add_item(
+                discord.ui.Button(
+                    label="View Full Prompt",
+                    url=full_prompt_url,
+                    style=discord.ButtonStyle.link,
+                )
+            )
+            await interaction.followup.send(embed=embed, view=button_view)
+        else:
+            await interaction.followup.send(embed=embed)
+
+    @view.autocomplete("name")
+    async def view_name_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        """Autocomplete for the view command's name parameter."""
+        return await self._preset_name_autocomplete(interaction, current)
+
 
 def _convert_context_to_messages(
     context: list[dict[str, Any]],
