@@ -268,6 +268,9 @@ class SetBehaviorGroup(app_commands.Group):
 class BehaviorPresetGroup(app_commands.Group):
     """Command group for managing behavior presets."""
 
+    # Hard limit of presets per guild
+    MAX_PRESETS_PER_GUILD = 15
+
     def __init__(self, bot: "DiscordBot") -> None:
         """Initialize the behavior_preset command group.
 
@@ -276,6 +279,113 @@ class BehaviorPresetGroup(app_commands.Group):
         """
         super().__init__(name="behavior_preset", description="Manage behavior presets")
         self.bot = bot
+
+    @app_commands.command(name="create", description="Create a new behavior preset")
+    @app_commands.describe(
+        name="Name for the preset",
+        description="Short description of this preset",
+        prompt="The behavior prompt text",
+    )
+    async def create(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        description: str,
+        prompt: str,
+    ) -> None:
+        """Create a new behavior preset for this server.
+
+        Args:
+            interaction: The Discord interaction.
+            name: Name for the preset.
+            description: Short description of this preset.
+            prompt: The behavior prompt text.
+        """
+        # Ensure command is used in a guild
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        embed_user = create_embed_user(interaction)
+        guild_id = str(interaction.guild_id)
+
+        try:
+            # Check preset limit
+            preset_count = await self.bot.repo.count_presets(guild_id)
+            if preset_count >= self.MAX_PRESETS_PER_GUILD:
+                error_view = InfoEmbedView(
+                    message=interaction.message,
+                    user=embed_user,
+                    title="Preset Limit Reached",
+                    description=(
+                        f"This server has reached the maximum of "
+                        f"{self.MAX_PRESETS_PER_GUILD} presets.\n\n"
+                        f"Delete an existing preset with `/behavior_preset delete` "
+                        f"before creating a new one."
+                    ),
+                    is_error=True,
+                )
+                await error_view.initialize(interaction)
+                return
+
+            # Create the preset
+            await self.bot.repo.create_preset(
+                guild_id=guild_id,
+                name=name,
+                description=description,
+                prompt_text=prompt,
+                created_by=interaction.user.name,
+            )
+
+            # Success message
+            display_prompt, full_prompt_url = await handle_text_overflow(
+                self.bot, "prompt", prompt, interaction.channel_id or 0
+            )
+
+            success_notes = [
+                {"name": "Name", "value": name},
+                {"name": "Description", "value": description},
+                {"name": "Prompt", "value": display_prompt},
+            ]
+            success_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Preset Created",
+                description=f"Successfully created behavior preset `{name}`.",
+                is_error=False,
+                notes=success_notes,
+                full_prompt_url=full_prompt_url,
+            )
+            await success_view.initialize(interaction)
+
+        except sqlite3.IntegrityError:
+            # Duplicate name error
+            error_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Duplicate Preset Name",
+                description=(
+                    f"A preset named `{name}` already exists in this server.\n\n"
+                    f"Please choose a different name."
+                ),
+                is_error=True,
+            )
+            await error_view.initialize(interaction)
+
+        except Exception:
+            error_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Error",
+                description="An unexpected error occurred while creating the preset.",
+                is_error=True,
+            )
+            await error_view.initialize(interaction)
 
     @app_commands.command(name="edit", description="Edit an existing behavior preset")
     @app_commands.describe(
