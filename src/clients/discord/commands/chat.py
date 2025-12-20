@@ -27,6 +27,160 @@ DEFAULT_PROMPT_TIMEOUT = 240.0
 DEFAULT_CLEAR_TIMEOUT = 60.0
 
 
+class SetBehaviorGroup(app_commands.Group):
+    """Command group for setting AI behavior."""
+
+    def __init__(self, bot: "DiscordBot") -> None:
+        """Initialize the set_behavior command group.
+
+        Args:
+            bot: The Discord bot instance.
+        """
+        super().__init__(name="set_behavior", description="Set AI behavior")
+        self.bot = bot
+
+    @app_commands.command(name="custom")
+    @app_commands.describe(prompt="Description of the personality of the AI")
+    async def custom(
+        self,
+        interaction: discord.Interaction,
+        prompt: str,
+        timeout: float | None = None,
+    ) -> None:
+        """Set a custom behavior prompt for the AI.
+
+        Args:
+            interaction: The Discord interaction.
+            prompt: The custom behavior prompt.
+            timeout: The timeout for the request in seconds.
+        """
+        assert interaction.channel_id is not None, "Command must be used in a channel"
+        channel_id = interaction.channel_id
+        await interaction.response.defer()
+
+        if timeout is None:
+            timeout = DEFAULT_PROMPT_TIMEOUT
+
+        embed_user = create_embed_user(interaction)
+
+        try:
+            async with asyncio.timeout(timeout):
+                await self.bot.repo.create_channel(channel_id)
+                await self.bot.repo.add_message(
+                    channel_id, "Anthropic", "behavior", False, prompt
+                )
+
+                # Refresh context after adding message
+                await self.bot.repo.get_visible_messages(channel_id, "All Models")
+
+                display_prompt, full_prompt_url = await handle_text_overflow(
+                    self.bot, "prompt", prompt, channel_id
+                )
+
+                processing_message = (
+                    "Updating behavior... (This may take up to 30 seconds)"
+                )
+                processing_notes = [{"name": "Prompt", "value": display_prompt}]
+                processing_view = InfoEmbedView(
+                    message=interaction.message,
+                    user=embed_user,
+                    title="Behavior Update",
+                    description=processing_message,
+                    is_error=False,
+                    notes=processing_notes,
+                    full_prompt_url=full_prompt_url,
+                )
+                await processing_view.initialize(interaction)
+
+                # Behavior prompts just acknowledge the new setting, no API call needed
+                response = (
+                    f"I will use the following system prompt for future interactions:"
+                    f"\n\n{prompt}"
+                )
+                await self.bot.repo.add_message(
+                    channel_id, "Anthropic", "assistant", False, response
+                )
+
+                display_response, full_response_url = await handle_text_overflow(
+                    self.bot, "response", response, channel_id
+                )
+
+                success_notes = [
+                    {"name": "Behavior Instructions", "value": display_prompt},
+                    {"name": "AI Acknowledgment", "value": display_response},
+                ]
+                success_view = InfoEmbedView(
+                    message=interaction.message,
+                    user=embed_user,
+                    title="Behavior Updated",
+                    is_error=False,
+                    notes=success_notes,
+                    full_response_url=full_response_url,
+                    full_prompt_url=full_prompt_url,
+                )
+                await success_view.initialize(interaction)
+
+        except TimeoutError:
+            error_message = (
+                f"The request timed out after {timeout} seconds. Please try again."
+            )
+            error_notes = [{"name": "Prompt", "value": prompt}]
+            error_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Behavior error!",
+                description=error_message,
+                is_error=True,
+                image_data=None,
+                notes=error_notes,
+            )
+            await error_view.initialize(interaction)
+
+        except Exception:
+            error_message = "An unexpected error occurred while processing your request."
+            error_notes = [{"name": "Prompt", "value": prompt}]
+            error_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Behavior error!",
+                description=error_message,
+                is_error=True,
+                image_data=None,
+                notes=error_notes,
+            )
+            await error_view.initialize(interaction)
+
+    @app_commands.command(name="preset")
+    @app_commands.describe(name="Name of the saved behavior preset")
+    async def preset(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+    ) -> None:
+        """Select a saved behavior preset.
+
+        Args:
+            interaction: The Discord interaction.
+            name: The name of the preset to select.
+        """
+        await interaction.response.defer()
+
+        embed_user = create_embed_user(interaction)
+
+        # Placeholder - preset selection will be implemented in a follow-up task
+        info_view = InfoEmbedView(
+            message=interaction.message,
+            user=embed_user,
+            title="Preset Selection",
+            description=(
+                f"Preset selection coming soon. You requested preset: `{name}`\n\n"
+                "For now, use `/set_behavior custom` to set a custom behavior prompt."
+            ),
+            is_error=False,
+        )
+        await info_view.initialize(interaction)
+
+
 def _convert_context_to_messages(
     context: list[dict[str, Any]],
 ) -> tuple[list[ChatMessage], str | None]:
@@ -92,7 +246,8 @@ def register_chat_commands(bot: "DiscordBot") -> None:
     `/create_image` - Generate an image using the AI.
     `/upload_image` - Upload an image to the bot.
     `/modify_image` - Modify an image using the AI.
-    `/behavior` - Alter the behavior and personality of the text AI.
+    `/set_behavior custom` - Set a custom behavior prompt for the AI.
+    `/set_behavior preset` - Select a saved behavior preset.
     `/clear` - Clear the bot's memory of the current channel, including images.
     `/help` - Display this message.
 
@@ -301,118 +456,8 @@ def register_chat_commands(bot: "DiscordBot") -> None:
             )
             await error_view.initialize(interaction)
 
-    @bot.tree.command()  # type: ignore[arg-type]
-    @app_commands.describe(prompt="Description of the personality of the AI")
-    @count_command
-    async def behavior(
-        interaction: discord.Interaction,
-        prompt: str,
-        timeout: float | None = None,
-    ) -> None:
-        """Submit a behavior change prompt for future AI responses.
-
-        Args:
-            interaction: The Discord interaction.
-            prompt: The behavior change prompt.
-            timeout: The timeout for the request in seconds.
-        """
-        assert interaction.channel_id is not None, "Command must be used in a channel"
-        channel_id = interaction.channel_id
-        await interaction.response.defer()
-
-        if timeout is None:
-            timeout = DEFAULT_PROMPT_TIMEOUT
-
-        embed_user = create_embed_user(interaction)
-
-        try:
-            async with asyncio.timeout(timeout):
-                await bot.repo.create_channel(channel_id)
-                await bot.repo.add_message(
-                    channel_id, "Anthropic", "behavior", False, prompt
-                )
-
-                # Refresh context after adding message (result not used, but triggers DB update)
-                await bot.repo.get_visible_messages(
-                    channel_id, "All Models"
-                )
-
-                display_prompt, full_prompt_url = await handle_text_overflow(
-                    bot, "prompt", prompt, channel_id
-                )
-
-                processing_message = (
-                    "Updating behavior... (This may take up to 30 seconds)"
-                )
-                processing_notes = [{"name": "Prompt", "value": display_prompt}]
-                processing_view = InfoEmbedView(
-                    message=interaction.message,
-                    user=embed_user,
-                    title="Behavior Update",
-                    description=processing_message,
-                    is_error=False,
-                    notes=processing_notes,
-                    full_prompt_url=full_prompt_url,
-                )
-                await processing_view.initialize(interaction)
-
-                # Behavior prompts just acknowledge the new setting, no API call needed
-                response = (
-                    f"I will use the following system prompt for future interactions:"
-                    f"\n\n{prompt}"
-                )
-                await bot.repo.add_message(
-                    channel_id, "Anthropic", "assistant", False, response
-                )
-
-                display_response, full_response_url = await handle_text_overflow(
-                    bot, "response", response, channel_id
-                )
-
-                success_notes = [
-                    {"name": "Behavior Instructions", "value": display_prompt},
-                    {"name": "AI Acknowledgment", "value": display_response},
-                ]
-                success_view = InfoEmbedView(
-                    message=interaction.message,
-                    user=embed_user,
-                    title="Behavior Updated",
-                    is_error=False,
-                    notes=success_notes,
-                    full_response_url=full_response_url,
-                    full_prompt_url=full_prompt_url,
-                )
-                await success_view.initialize(interaction)
-
-        except TimeoutError:
-            error_message = (
-                f"The request timed out after {timeout} seconds. Please try again."
-            )
-            error_notes = [{"name": "Prompt", "value": prompt}]
-            error_view = InfoEmbedView(
-                message=interaction.message,
-                user=embed_user,
-                title="Behavior error!",
-                description=error_message,
-                is_error=True,
-                image_data=None,
-                notes=error_notes,
-            )
-            await error_view.initialize(interaction)
-
-        except Exception:
-            error_message = "An unexpected error occurred while processing your request."
-            error_notes = [{"name": "Prompt", "value": prompt}]
-            error_view = InfoEmbedView(
-                message=interaction.message,
-                user=embed_user,
-                title="Behavior error!",
-                description=error_message,
-                is_error=True,
-                image_data=None,
-                notes=error_notes,
-            )
-            await error_view.initialize(interaction)
+    # Register the set_behavior command group
+    bot.tree.add_command(SetBehaviorGroup(bot))
 
     @bot.tree.command()  # type: ignore[arg-type]
     @app_commands.describe()
