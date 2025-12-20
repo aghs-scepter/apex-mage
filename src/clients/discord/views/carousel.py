@@ -17,6 +17,7 @@ from src.core.logging import get_logger
 from src.core.providers import ImageModifyRequest
 
 if TYPE_CHECKING:
+    from src.adapters.gcs_adapter import GCSAdapter
     from src.adapters.repository_compat import RepositoryAdapter
     from src.core.providers import ImageProvider
     from src.core.rate_limit import SlidingWindowRateLimiter
@@ -73,6 +74,7 @@ class InfoEmbedView(discord.ui.View):
         notes: list[dict[str, str]] | None = None,
         full_response_url: str | None = None,
         full_prompt_url: str | None = None,
+        download_url: str | None = None,
     ) -> None:
         super().__init__()
         self.user = user
@@ -85,6 +87,7 @@ class InfoEmbedView(discord.ui.View):
         self.notes = notes
         self.full_response_url = full_response_url
         self.full_prompt_url = full_prompt_url
+        self.download_url = download_url
         self.embed: discord.Embed | None = None
 
     async def initialize(self, interaction: discord.Interaction) -> None:
@@ -844,6 +847,7 @@ class ImageEditPerformView(discord.ui.View):
         rate_limiter: "SlidingWindowRateLimiter | None" = None,
         image_provider: "ImageProvider | None" = None,
         image_data_list: list[dict[str, str]] | None = None,
+        gcs_adapter: "GCSAdapter | None" = None,
     ) -> None:
         super().__init__()
         self.interaction = interaction
@@ -856,6 +860,7 @@ class ImageEditPerformView(discord.ui.View):
         self.on_complete = on_complete
         self.rate_limiter = rate_limiter
         self.image_provider = image_provider
+        self.gcs_adapter = gcs_adapter
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.embed: discord.Embed | None = None
 
@@ -978,6 +983,28 @@ class ImageEditPerformView(discord.ui.View):
             # Record the request after successful operation
             if self.rate_limiter:
                 await self.rate_limiter.record(self.interaction.user.id, "image")
+
+            # Upload to GCS for download button (optional - may fail if not configured)
+            if self.gcs_adapter and self.interaction.channel_id is not None:
+                try:
+                    cloud_url = await asyncio.to_thread(
+                        self.gcs_adapter.upload_modified_image,
+                        self.interaction.channel_id,
+                        result_image_data,
+                    )
+                    image_return["cloud_url"] = cloud_url
+                    logger.debug(
+                        "gcs_upload_success",
+                        cloud_url=cloud_url,
+                        channel_id=self.interaction.channel_id,
+                    )
+                except Exception as gcs_ex:
+                    # Log but don't fail - image still works without GCS upload
+                    logger.warning(
+                        "gcs_upload_failed",
+                        error=str(gcs_ex),
+                        channel_id=self.interaction.channel_id,
+                    )
 
             # Call completion callback
             if self.on_complete:

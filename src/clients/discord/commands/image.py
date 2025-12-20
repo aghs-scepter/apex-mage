@@ -23,10 +23,13 @@ from src.core.image_utils import (
     format_image_response,
     image_strip_headers,
 )
+from src.core.logging import get_logger
 from src.core.providers import ImageRequest
 
 if TYPE_CHECKING:
     from src.clients.discord.bot import DiscordBot
+
+logger = get_logger(__name__)
 
 # Timeout constants
 DEFAULT_IMAGE_TIMEOUT = 240.0
@@ -192,6 +195,27 @@ def register_image_commands(bot: "DiscordBot") -> None:
                         image_data, "jpeg", has_nsfw
                     )
 
+                    # Upload image to GCS for download button
+                    download_url: str | None = None
+                    try:
+                        download_url = await asyncio.to_thread(
+                            bot.gcs_adapter.upload_generated_image,
+                            channel_id,
+                            image_data,
+                        )
+                        logger.info(
+                            "image_uploaded_to_gcs",
+                            channel_id=channel_id,
+                            download_url=download_url,
+                        )
+                    except Exception as upload_error:
+                        logger.error(
+                            "gcs_upload_failed",
+                            channel_id=channel_id,
+                            error=str(upload_error),
+                        )
+                        # Continue without download URL - image still shows
+
                     output_message = (
                         "Your image was created successfully. "
                         "You can use it for future `/prompt` and `/modify_image` commands."
@@ -206,6 +230,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
                         notes=output_notes,
                         full_prompt_url=full_prompt_url,
                         image_data={"filename": output_filename, "image": image_data},
+                        download_url=download_url,
                     )
                     await output_view.initialize(interaction)
                 else:
@@ -379,6 +404,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
                 on_complete=on_edit_complete,
                 rate_limiter=bot.rate_limiter,
                 image_provider=bot.image_provider,
+                gcs_adapter=bot.gcs_adapter,
             )
             await perform_view.initialize(edit_interaction)
 

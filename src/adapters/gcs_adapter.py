@@ -224,3 +224,137 @@ class GCSAdapter:
                 channel_id=user_id,
                 original_error=ex,
             ) from ex
+
+    def upload_generated_image(
+        self,
+        channel_id: int | str,
+        image_data: str,
+    ) -> str:
+        """Upload a generated image to GCS and return the public URL.
+
+        The image is uploaded with the following path pattern:
+        images/generated/{channel_id}/{uuid}.jpeg
+
+        Args:
+            channel_id: The channel ID for organizing uploads.
+            image_data: The base64-encoded JPEG image data.
+
+        Returns:
+            str: The public URL of the uploaded file.
+
+        Raises:
+            GCSUploadError: If the upload fails for any reason.
+        """
+        logger.debug(
+            "Uploading generated image to GCS",
+            extra={
+                "channel_id": channel_id,
+                "data_length": len(image_data),
+            },
+        )
+
+        try:
+            client = self._get_client()
+            bucket = client.bucket(self._bucket_name)
+            image_uuid = uuid4()
+            blob_path = f"images/generated/{channel_id}/{image_uuid}.jpeg"
+            blob = bucket.blob(blob_path)
+
+            # Decode base64 image data
+            image_bytes = base64.b64decode(image_data)
+            content_type = "image/jpeg"
+
+            blob.upload_from_string(image_bytes, content_type=content_type)
+            url = cast(str, blob.public_url)
+
+            logger.debug(
+                "Successfully uploaded generated image to GCS",
+                extra={
+                    "channel_id": channel_id,
+                    "url": url,
+                },
+            )
+            return url
+
+        except Exception as ex:
+            logger.error(
+                "Failed to upload generated image to GCS",
+                extra={
+                    "channel_id": channel_id,
+                    "error": str(ex),
+                },
+                exc_info=True,
+            )
+            raise GCSUploadError(
+                message=f"Failed to upload generated image to GCS: {ex}",
+                message_type="generated",
+                channel_id=channel_id,
+                original_error=ex,
+            ) from ex
+
+    def upload_modified_image(
+        self,
+        channel_id: int | str,
+        image_data: str,
+    ) -> str:
+        """Upload a modified image to GCS and return the public URL.
+
+        The image is uploaded with the following path pattern:
+        images/modified/{channel_id}/{uuid}.jpeg
+
+        Args:
+            channel_id: The channel ID for organizing uploads.
+            image_data: The base64-encoded JPEG image data.
+
+        Returns:
+            str: The public URL of the uploaded file.
+
+        Raises:
+            GCSUploadError: If the upload fails for any reason.
+        """
+        logger.debug(
+            "Uploading modified image to GCS",
+            extra={
+                "channel_id": channel_id,
+                "data_length": len(image_data),
+            },
+        )
+
+        try:
+            client = self._get_client()
+            bucket = client.bucket(self._bucket_name)
+            image_uuid = uuid4()
+            blob_path = f"images/modified/{channel_id}/{image_uuid}.jpeg"
+            blob = bucket.blob(blob_path)
+
+            # Decode base64 image data
+            image_bytes = base64.b64decode(image_data)
+            content_type = "image/jpeg"
+
+            blob.upload_from_string(image_bytes, content_type=content_type)
+            url = cast(str, blob.public_url)
+
+            logger.debug(
+                "Successfully uploaded modified image to GCS",
+                extra={
+                    "channel_id": channel_id,
+                    "url": url,
+                },
+            )
+            return url
+
+        except Exception as ex:
+            logger.error(
+                "Failed to upload modified image to GCS",
+                extra={
+                    "channel_id": channel_id,
+                    "error": str(ex),
+                },
+                exc_info=True,
+            )
+            raise GCSUploadError(
+                message=f"Failed to upload modified image to GCS: {ex}",
+                message_type="modified",
+                channel_id=channel_id,
+                original_error=ex,
+            ) from ex
