@@ -82,6 +82,39 @@ _CREATE_API_KEYS_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 """
 
+_CREATE_BANS_TABLE = """
+CREATE TABLE IF NOT EXISTS bans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+_CREATE_BAN_HISTORY_TABLE = """
+CREATE TABLE IF NOT EXISTS ban_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    action TEXT NOT NULL,
+    reason TEXT,
+    performed_by TEXT NOT NULL,
+    performed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+_CREATE_BEHAVIOR_PRESETS_TABLE = """
+CREATE TABLE IF NOT EXISTS behavior_presets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    prompt_text TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(guild_id, name)
+);
+"""
+
 # =============================================================================
 # SQL Query Definitions
 # =============================================================================
@@ -303,6 +336,65 @@ SET is_active = 0
 WHERE key_hash = ?;
 """
 
+# Ban queries
+_SELECT_BAN_BY_USERNAME = """
+SELECT id, username, reason, created_at
+FROM bans
+WHERE username = ?;
+"""
+
+_INSERT_BAN = """
+INSERT INTO bans (username, reason)
+VALUES (?, ?);
+"""
+
+_DELETE_BAN = """
+DELETE FROM bans
+WHERE username = ?;
+"""
+
+_INSERT_BAN_HISTORY = """
+INSERT INTO ban_history (username, action, reason, performed_by)
+VALUES (?, ?, ?, ?);
+"""
+
+# Behavior presets queries
+_SELECT_PRESET = """
+SELECT id, guild_id, name, description, prompt_text, created_by, created_at
+FROM behavior_presets
+WHERE guild_id = ? AND name = ?;
+"""
+
+_SELECT_PRESETS_BY_GUILD = """
+SELECT id, guild_id, name, description, prompt_text, created_by, created_at
+FROM behavior_presets
+WHERE guild_id = ?
+ORDER BY name ASC;
+"""
+
+_COUNT_PRESETS_BY_GUILD = """
+SELECT COUNT(*) AS count
+FROM behavior_presets
+WHERE guild_id = ?;
+"""
+
+_INSERT_PRESET = """
+INSERT INTO behavior_presets (guild_id, name, description, prompt_text, created_by)
+VALUES (?, ?, ?, ?, ?);
+"""
+
+_UPDATE_PRESET = """
+UPDATE behavior_presets
+SET description = COALESCE(?, description),
+    prompt_text = COALESCE(?, prompt_text)
+WHERE guild_id = ? AND name = ?;
+"""
+
+_DELETE_PRESET = """
+DELETE FROM behavior_presets
+WHERE guild_id = ? AND name = ?;
+"""
+
 
 # =============================================================================
 # Repository Implementation
@@ -388,6 +480,9 @@ class SQLiteRepository:
             self._connection.execute(_CREATE_CHANNEL_MESSAGES_TABLE)
             self._connection.execute(_CREATE_API_KEYS_TABLE)
             self._connection.execute(_CREATE_API_KEYS_INDEX)
+            self._connection.execute(_CREATE_BANS_TABLE)
+            self._connection.execute(_CREATE_BAN_HISTORY_TABLE)
+            self._connection.execute(_CREATE_BEHAVIOR_PRESETS_TABLE)
             self._connection.commit()
 
         await asyncio.to_thread(init_sync)
@@ -867,3 +962,227 @@ class SQLiteRepository:
             logger.info(f"Revoked API key hash {key_hash[:8]}...")
             return True
         return False
+
+    # =========================================================================
+    # BanRepository Implementation
+    # =========================================================================
+
+    async def is_user_banned(self, username: str) -> bool:
+        """Check if a user is banned.
+
+        Args:
+            username: The Discord username to check.
+
+        Returns:
+            True if the user is banned, False otherwise.
+        """
+        conn = self._ensure_connected()
+
+        def query_sync() -> sqlite3.Row | None:
+            cursor = conn.execute(_SELECT_BAN_BY_USERNAME, (username,))
+            return cast(sqlite3.Row | None, cursor.fetchone())
+
+        row = await asyncio.to_thread(query_sync)
+        return row is not None
+
+    async def get_ban_reason(self, username: str) -> str | None:
+        """Get the ban reason for a user.
+
+        Args:
+            username: The Discord username to check.
+
+        Returns:
+            The ban reason if the user is banned, None otherwise.
+        """
+        conn = self._ensure_connected()
+
+        def query_sync() -> sqlite3.Row | None:
+            cursor = conn.execute(_SELECT_BAN_BY_USERNAME, (username,))
+            return cast(sqlite3.Row | None, cursor.fetchone())
+
+        row = await asyncio.to_thread(query_sync)
+        if row is None:
+            return None
+        return cast(str, row["reason"])
+
+    async def add_ban(
+        self,
+        username: str,
+        reason: str,
+        performed_by: str,
+    ) -> None:
+        """Add a ban for a user.
+
+        Args:
+            username: The Discord username to ban.
+            reason: The reason for the ban.
+            performed_by: The username of the person performing the ban.
+
+        Raises:
+            sqlite3.IntegrityError: If the user is already banned.
+        """
+        conn = self._ensure_connected()
+
+        def insert_sync() -> None:
+            conn.execute(_INSERT_BAN, (username, reason))
+            conn.execute(
+                _INSERT_BAN_HISTORY,
+                (username, "ban", reason, performed_by),
+            )
+            conn.commit()
+
+        await asyncio.to_thread(insert_sync)
+        logger.info(f"User {username} banned by {performed_by}: {reason}")
+
+    async def remove_ban(self, username: str, performed_by: str) -> None:
+        """Remove a ban for a user.
+
+        Args:
+            username: The Discord username to unban.
+            performed_by: The username of the person performing the unban.
+        """
+        conn = self._ensure_connected()
+
+        def delete_sync() -> None:
+            conn.execute(_DELETE_BAN, (username,))
+            conn.execute(
+                _INSERT_BAN_HISTORY,
+                (username, "unban", None, performed_by),
+            )
+            conn.commit()
+
+        await asyncio.to_thread(delete_sync)
+        logger.info(f"User {username} unbanned by {performed_by}")
+
+    # =========================================================================
+    # BehaviorPresetRepository Implementation
+    # =========================================================================
+
+    async def get_preset(self, guild_id: str, name: str) -> dict[str, Any] | None:
+        """Get a specific behavior preset by guild and name.
+
+        Args:
+            guild_id: The Discord guild ID.
+            name: The preset name.
+
+        Returns:
+            The preset as a dictionary, or None if not found.
+        """
+        conn = self._ensure_connected()
+
+        def query_sync() -> sqlite3.Row | None:
+            cursor = conn.execute(_SELECT_PRESET, (guild_id, name))
+            return cast(sqlite3.Row | None, cursor.fetchone())
+
+        row = await asyncio.to_thread(query_sync)
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    async def list_presets(self, guild_id: str) -> list[dict[str, Any]]:
+        """List all behavior presets for a guild.
+
+        Args:
+            guild_id: The Discord guild ID.
+
+        Returns:
+            List of presets as dictionaries, ordered by name.
+        """
+        conn = self._ensure_connected()
+
+        def query_sync() -> list[sqlite3.Row]:
+            cursor = conn.execute(_SELECT_PRESETS_BY_GUILD, (guild_id,))
+            return cursor.fetchall()
+
+        rows = await asyncio.to_thread(query_sync)
+        return [self._row_to_dict(row) for row in rows]
+
+    async def count_presets(self, guild_id: str) -> int:
+        """Count the number of presets for a guild.
+
+        Args:
+            guild_id: The Discord guild ID.
+
+        Returns:
+            The number of presets in the guild.
+        """
+        conn = self._ensure_connected()
+
+        def query_sync() -> int:
+            cursor = conn.execute(_COUNT_PRESETS_BY_GUILD, (guild_id,))
+            row = cursor.fetchone()
+            return row["count"] if row else 0
+
+        return await asyncio.to_thread(query_sync)
+
+    async def create_preset(
+        self,
+        guild_id: str,
+        name: str,
+        description: str,
+        prompt_text: str,
+        created_by: str,
+    ) -> None:
+        """Create a new behavior preset.
+
+        Args:
+            guild_id: The Discord guild ID.
+            name: The preset name (must be unique within guild).
+            description: A brief description of the preset.
+            prompt_text: The full behavior prompt text.
+            created_by: The Discord user ID who created the preset.
+        """
+        conn = self._ensure_connected()
+
+        def insert_sync() -> None:
+            conn.execute(
+                _INSERT_PRESET,
+                (guild_id, name, description, prompt_text, created_by),
+            )
+            conn.commit()
+
+        await asyncio.to_thread(insert_sync)
+        logger.debug(f"Created behavior preset '{name}' for guild {guild_id}")
+
+    async def update_preset(
+        self,
+        guild_id: str,
+        name: str,
+        description: str | None = None,
+        prompt_text: str | None = None,
+    ) -> None:
+        """Update an existing behavior preset.
+
+        Args:
+            guild_id: The Discord guild ID.
+            name: The preset name to update.
+            description: New description (optional, None keeps existing).
+            prompt_text: New prompt text (optional, None keeps existing).
+        """
+        conn = self._ensure_connected()
+
+        def update_sync() -> None:
+            conn.execute(
+                _UPDATE_PRESET,
+                (description, prompt_text, guild_id, name),
+            )
+            conn.commit()
+
+        await asyncio.to_thread(update_sync)
+        logger.debug(f"Updated behavior preset '{name}' for guild {guild_id}")
+
+    async def delete_preset(self, guild_id: str, name: str) -> None:
+        """Delete a behavior preset.
+
+        Args:
+            guild_id: The Discord guild ID.
+            name: The preset name to delete.
+        """
+        conn = self._ensure_connected()
+
+        def delete_sync() -> None:
+            conn.execute(_DELETE_PRESET, (guild_id, name))
+            conn.commit()
+
+        await asyncio.to_thread(delete_sync)
+        logger.debug(f"Deleted behavior preset '{name}' for guild {guild_id}")
