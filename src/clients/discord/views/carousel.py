@@ -1528,6 +1528,10 @@ class GoogleResultsCarouselView(discord.ui.View):
     Displays one image at a time from search results with navigation
     and action buttons. Images are displayed from URLs rather than
     base64 data.
+
+    Supports adding images to context with URL-based deduplication.
+    When an image URL is already in context, the Add to Context button
+    is disabled with "Already in Context" label.
     """
 
     def __init__(
@@ -1537,6 +1541,7 @@ class GoogleResultsCarouselView(discord.ui.View):
         query: str,
         user: dict[str, Any] | None = None,
         message: discord.Message | None = None,
+        repo: "RepositoryAdapter | None" = None,
         on_add_to_context: (
             Callable[
                 [discord.Interaction, dict[str, str], "GoogleResultsCarouselView"],
@@ -1567,6 +1572,7 @@ class GoogleResultsCarouselView(discord.ui.View):
             query: The search query that produced these results.
             user: Optional user dict with 'name', 'id', and 'pfp' keys.
             message: Optional message to edit when updating the view.
+            repo: Repository adapter for storing images to context.
             on_add_to_context: Callback when user clicks Add to Context.
                 Receives interaction, current result dict, and this view.
             on_edit_image: Callback when user clicks Edit This Image.
@@ -1582,10 +1588,15 @@ class GoogleResultsCarouselView(discord.ui.View):
         self.query = query
         self.current_index = 0
         self.message = message
+        self.repo = repo
         self.on_add_to_context = on_add_to_context
         self.on_edit_image = on_edit_image
         self.on_return = on_return
         self.healthy = bool(self.results)
+        # Track URLs added to context during this session
+        self.added_urls: set[str] = set()
+        # Track URLs already in context (populated on initialization)
+        self.existing_context_urls: set[str] = set()
 
     def generate_chrono_bar(self) -> str:
         """Generate a visual position indicator for the carousel.
@@ -1798,21 +1809,32 @@ class GoogleResultsCarouselView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button["GoogleResultsCarouselView"],
     ) -> None:
-        """Return to the initial embed (ImageSelectionTypeView)."""
+        """Return to the initial embed (ImageSelectionTypeView).
+
+        Calls the on_return callback if provided, then stops this view
+        to clear the search state. Images previously added to context
+        are already persisted in the database and will remain.
+        """
         if self.user_id != interaction.user.id:
             await interaction.response.send_message(
                 f"Only the original requester ({self.username}) can use this.",
                 ephemeral=True,
             )
             return
-        await interaction.response.defer()
+
+        # Call the callback if provided (handles navigation logic)
         if self.on_return:
             await self.on_return(interaction, self)
         else:
+            # Default behavior: just acknowledge
+            await interaction.response.defer()
             logger.debug(
-                "return_placeholder",
+                "return_no_callback",
                 view="GoogleResultsCarouselView",
             )
+
+        # Stop this view (clears search state)
+        self.stop()
 
     async def on_timeout(self) -> None:
         """Update the embed on timeout."""
