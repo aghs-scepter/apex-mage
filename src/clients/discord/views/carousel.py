@@ -27,7 +27,10 @@ logger = get_logger(__name__)
 EMBED_COLOR_ERROR = 0xE91515
 EMBED_COLOR_INFO = 0x3498DB
 
-# Timeout for image generation API calls (seconds)
+# Timeout constants (seconds)
+# User interaction timeout (how long user has to click/submit)
+USER_INTERACTION_TIMEOUT = 300.0  # 5 minutes
+# API timeout for image generation calls
 API_TIMEOUT_SECONDS = 180
 
 
@@ -274,8 +277,8 @@ class ImageSelectionTypeView(discord.ui.View):
         ) = None,
         repo: "RepositoryAdapter | None" = None,
     ) -> None:
-        # timeout=None ensures download button remains functional indefinitely
-        super().__init__(timeout=None)
+        # User has 5 minutes to make a selection
+        super().__init__(timeout=USER_INTERACTION_TIMEOUT)
         self.user = user
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.embed: discord.Embed | None = None
@@ -422,8 +425,8 @@ class ImageCarouselView(discord.ui.View):
             | None
         ) = None,
     ) -> None:
-        # timeout=None ensures download button remains functional indefinitely
-        super().__init__(timeout=None)
+        # User has 5 minutes to make a selection
+        super().__init__(timeout=USER_INTERACTION_TIMEOUT)
         self.user = user
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.embed: discord.Embed | None = None
@@ -639,8 +642,8 @@ class ImageEditTypeView(discord.ui.View):
             Callable[[discord.Interaction], Coroutine[Any, Any, None]] | None
         ) = None,
     ) -> None:
-        # timeout=None ensures download button remains functional indefinitely
-        super().__init__(timeout=None)
+        # User has 5 minutes to make a selection
+        super().__init__(timeout=USER_INTERACTION_TIMEOUT)
         self.image_data = image_data
         self.image_data_list = image_data_list or [image_data]
         self.user = user
@@ -978,14 +981,16 @@ class ImageEditPerformView(discord.ui.View):
             # Extract base64 image data from all selected images
             image_data_strings = [img["image"] for img in self.image_data_list]
 
-            modified_images = await self.image_provider.modify(
-                ImageModifyRequest(
-                    prompt=prompt,
-                    image_data=image_data_strings[0],  # For backward compatibility
-                    image_data_list=image_data_strings,  # All images for multi-image
-                    guidance_scale=0.0,  # Not used by nano-banana-pro/edit
+            # Wrap API call with timeout to distinguish from View timeout
+            async with asyncio.timeout(API_TIMEOUT_SECONDS):
+                modified_images = await self.image_provider.modify(
+                    ImageModifyRequest(
+                        prompt=prompt,
+                        image_data=image_data_strings[0],  # For backward compatibility
+                        image_data_list=image_data_strings,  # All images for multi-image
+                        guidance_scale=0.0,  # Not used by nano-banana-pro/edit
+                    )
                 )
-            )
             modified_image = modified_images[0]
 
             # Process the response
@@ -1028,6 +1033,16 @@ class ImageEditPerformView(discord.ui.View):
             # Call completion callback
             if self.on_complete:
                 await self.on_complete(self.interaction, image_return)
+
+        except TimeoutError:
+            # API timeout - distinct from View's on_timeout (user interaction timeout)
+            logger.error("image_generation_timeout", timeout_seconds=API_TIMEOUT_SECONDS)
+            error_data = {
+                "error": True,
+                "message": "Image generation timed out. Please try again.",
+            }
+            if self.on_complete:
+                await self.on_complete(self.interaction, error_data)
 
         except Exception as ex:
             logger.error("image_edit_error", error=str(ex))

@@ -32,8 +32,12 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 # Timeout constants
-DEFAULT_IMAGE_TIMEOUT = 240.0
-DEFAULT_USER_INTERACTION_TIMEOUT = 90.0
+# API timeout for image generation requests
+DEFAULT_API_TIMEOUT = 180.0
+# View timeout for user interaction (how long user has to submit/click)
+DEFAULT_USER_INTERACTION_TIMEOUT = 300.0  # 5 minutes
+# Legacy alias for backwards compatibility
+DEFAULT_IMAGE_TIMEOUT = DEFAULT_API_TIMEOUT
 DEFAULT_EXTENDED_USER_INTERACTION_TIMEOUT = 600.0
 
 
