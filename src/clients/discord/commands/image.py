@@ -498,5 +498,8 @@ def register_image_commands(bot: "DiscordBot") -> None:
             user=embed_user,
             on_select=on_selection_type,
             repo=bot.repo,
+            rate_limiter=bot.rate_limiter,
+            image_provider=bot.image_provider,
+            gcs_adapter=bot.gcs_adapter,
         )
         await selection_view.initialize(interaction)

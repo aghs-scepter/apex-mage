@@ -319,6 +319,9 @@ class ImageSelectionTypeView(discord.ui.View):
             Callable[[discord.Interaction, str], Coroutine[Any, Any, None]] | None
         ) = None,
         repo: "RepositoryAdapter | None" = None,
+        rate_limiter: "SlidingWindowRateLimiter | None" = None,
+        image_provider: "ImageProvider | None" = None,
+        gcs_adapter: "GCSAdapter | None" = None,
     ) -> None:
         # User has 5 minutes to make a selection
         super().__init__(timeout=USER_INTERACTION_TIMEOUT)
@@ -328,6 +331,9 @@ class ImageSelectionTypeView(discord.ui.View):
         self.message: discord.Message | None = None
         self.on_select = on_select
         self.repo = repo
+        self.rate_limiter = rate_limiter
+        self.image_provider = image_provider
+        self.gcs_adapter = gcs_adapter
 
     async def initialize(self, interaction: discord.Interaction) -> None:
         """Initialize the image selection type modal."""
@@ -364,12 +370,13 @@ class ImageSelectionTypeView(discord.ui.View):
         self, has_previous_image: bool, has_recent_images: bool
     ) -> None:
         """Update button states based on available images."""
-        self.last_image_button.disabled = not has_previous_image
+        # Google search is always enabled
+        self.google_search_button.disabled = False
         self.recent_images_button.disabled = not has_recent_images
 
     def disable_buttons(self) -> None:
         """Disable all selection buttons."""
-        self.last_image_button.disabled = True
+        self.google_search_button.disabled = True
         self.recent_images_button.disabled = True
         self.cancel_button.disabled = True
 
@@ -385,13 +392,13 @@ class ImageSelectionTypeView(discord.ui.View):
         self.hide_buttons()
         await interaction.response.edit_message(embed=self.embed, view=self)
 
-    @discord.ui.button(
-        label="Google (disabled)", style=discord.ButtonStyle.primary, disabled=True
-    )
-    async def last_image_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button["ImageSelectionTypeView"]
+    @discord.ui.button(label="Google", style=discord.ButtonStyle.primary)
+    async def google_search_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["ImageSelectionTypeView"],
     ) -> None:
-        """Use most recently selected or uploaded image."""
+        """Open Google Image search."""
         if self.user_id != interaction.user.id:
             await interaction.response.send_message(
                 f"Only the original requester ({self.username}) can select this option.",
@@ -399,9 +406,236 @@ class ImageSelectionTypeView(discord.ui.View):
             )
             return
 
-        if self.on_select:
-            self.hide_buttons()
-            await self.on_select(interaction, "My Last Image")
+        # Show the GoogleSearchModal
+        modal = GoogleSearchModal(on_submit=self._handle_google_search)
+        await interaction.response.send_modal(modal)
+
+    async def _handle_google_search(
+        self, interaction: discord.Interaction, query: str
+    ) -> None:
+        """Handle Google search query submission.
+
+        This method orchestrates the full Google Image search flow:
+        1. Show processing message
+        2. Screen the query via Haiku content screening
+        3. If rejected: log to database and show error
+        4. If approved: execute SerpAPI search
+        5. Display results in GoogleResultsCarouselView
+
+        Args:
+            interaction: The Discord interaction from the modal submit.
+            query: The search query entered by the user.
+        """
+        from src.core.content_screening import screen_search_query
+        from src.providers.serpapi_provider import SerpAPIError, search_google_images
+
+        await interaction.response.defer()
+
+        # 1. Show processing message
+        if self.embed:
+            self.embed.title = "Google Image Search"
+            self.embed.description = f"Searching for: {query}... Processing"
+        if self.message:
+            await self.message.edit(embed=self.embed, view=None)
+
+        # 2. Screen the query via Haiku
+        try:
+            screening_result = await screen_search_query(query)
+        except Exception as e:
+            logger.error(
+                "content_screening_error",
+                view="ImageSelectionTypeView",
+                query=query,
+                error=str(e),
+            )
+            # Fail closed - treat screening errors as rejections
+            if self.embed:
+                self.embed.title = "Search Blocked"
+                self.embed.description = (
+                    "Content screening service is unavailable. Please try again later."
+                )
+                self.embed.color = EMBED_COLOR_ERROR
+            if self.message:
+                await self.message.edit(embed=self.embed, view=None)
+            return
+
+        if not screening_result.allowed:
+            # Log rejection to database
+            if self.repo and interaction.channel_id is not None:
+                guild_id = interaction.guild_id if interaction.guild else None
+                await self.repo.log_search_rejection(
+                    user_id=interaction.user.id,
+                    channel_id=interaction.channel_id,
+                    guild_id=guild_id,
+                    query_text=query,
+                    rejection_reason=screening_result.reason or "Content policy violation",
+                )
+                logger.info(
+                    "search_query_rejected",
+                    view="ImageSelectionTypeView",
+                    user_id=interaction.user.id,
+                    channel_id=interaction.channel_id,
+                    query=query,
+                    reason=screening_result.reason,
+                )
+
+            # Show rejection message
+            if self.embed:
+                self.embed.title = "Search Blocked"
+                self.embed.description = (
+                    f"Your search for **{query}** was blocked.\n\n"
+                    f"Reason: {screening_result.reason or 'Content policy violation'}"
+                )
+                self.embed.color = EMBED_COLOR_ERROR
+            if self.message:
+                await self.message.edit(embed=self.embed, view=None)
+            return
+
+        # 3. Execute SerpAPI search
+        try:
+            results = await search_google_images(query, num_results=10)
+        except ValueError as e:
+            # API key not configured
+            logger.error(
+                "serpapi_config_error",
+                view="ImageSelectionTypeView",
+                error=str(e),
+            )
+            if self.embed:
+                self.embed.title = "Search Error"
+                self.embed.description = (
+                    "Google Image Search is not configured. "
+                    "Please contact the bot administrator."
+                )
+                self.embed.color = EMBED_COLOR_ERROR
+            if self.message:
+                await self.message.edit(embed=self.embed, view=None)
+            return
+        except SerpAPIError as e:
+            logger.error(
+                "serpapi_search_error",
+                view="ImageSelectionTypeView",
+                query=query,
+                error=str(e),
+            )
+            if self.embed:
+                self.embed.title = "Search Error"
+                self.embed.description = "Search failed, please try again."
+                self.embed.color = EMBED_COLOR_ERROR
+            if self.message:
+                await self.message.edit(embed=self.embed, view=None)
+            return
+
+        if not results:
+            if self.embed:
+                self.embed.title = "No Results"
+                self.embed.description = f"No images found for: {query}"
+                self.embed.color = EMBED_COLOR_INFO
+            if self.message:
+                await self.message.edit(embed=self.embed, view=None)
+            return
+
+        # 4. Convert results to the format expected by GoogleResultsCarouselView
+        result_dicts = [
+            {
+                "url": r.url,
+                "thumbnail_url": r.thumbnail_url or "",
+                "title": r.title or "",
+                "source_url": r.source_url or "",
+            }
+            for r in results
+        ]
+
+        # 5. Create return callback
+        async def on_return(
+            return_interaction: discord.Interaction, view: GoogleResultsCarouselView
+        ) -> None:
+            """Handle return from GoogleResultsCarouselView to ImageSelectionTypeView."""
+            # Re-create ImageSelectionTypeView
+            new_view = ImageSelectionTypeView(
+                interaction=return_interaction,
+                user=self.user,
+                on_select=self.on_select,
+                repo=self.repo,
+                rate_limiter=self.rate_limiter,
+                image_provider=self.image_provider,
+                gcs_adapter=self.gcs_adapter,
+            )
+            # Re-initialize the view with the return interaction
+            # First respond to the interaction
+            await return_interaction.response.defer()
+            # Update the message content
+            new_view.message = self.message
+            new_view.embed = discord.Embed(
+                title="Image Selection Type",
+                description="Select an option to choose an image for your request.",
+            )
+            new_view.embed.set_author(
+                name=f"{self.username} (via Apex Mage)",
+                url="https://github.com/aghs-scepter/apex-mage",
+                icon_url=self.pfp,
+            )
+            # Check for recent images
+            has_recent_images = False
+            if self.repo and return_interaction.channel_id is not None:
+                has_recent_images = await self.repo.has_images_in_context(
+                    return_interaction.channel_id, "All Models"
+                )
+            new_view.update_buttons(False, has_recent_images)
+            if new_view.message:
+                await new_view.message.edit(embed=new_view.embed, view=new_view)
+
+        # 6. Create and show GoogleResultsCarouselView
+        carousel = GoogleResultsCarouselView(
+            interaction=interaction,
+            results=result_dicts,
+            query=query,
+            user=self.user,
+            message=self.message,
+            repo=self.repo,
+            on_return=on_return,
+            rate_limiter=self.rate_limiter,
+            image_provider=self.image_provider,
+            gcs_adapter=self.gcs_adapter,
+            on_edit_complete=self._on_edit_complete,
+        )
+        await carousel.initialize(interaction)
+
+    async def _on_edit_complete(
+        self, interaction: discord.Interaction, result_data: dict[str, Any]
+    ) -> None:
+        """Handle completed image edit from GoogleResultsCarouselView.
+
+        Stores the edited image result in the channel's context.
+
+        Args:
+            interaction: The Discord interaction.
+            result_data: The edited image data to store.
+        """
+        if self.repo and interaction.channel_id is not None:
+            try:
+                await self.repo.create_channel(interaction.channel_id)
+                images = [result_data]
+                str_images = json.dumps(images)
+                await self.repo.add_message_with_images(
+                    interaction.channel_id,
+                    "Anthropic",
+                    "prompt",
+                    False,
+                    "Edited Image",
+                    str_images,
+                )
+                logger.info(
+                    "edit_complete_stored",
+                    view="ImageSelectionTypeView",
+                    channel_id=interaction.channel_id,
+                )
+            except Exception as e:
+                logger.error(
+                    "edit_complete_store_failed",
+                    view="ImageSelectionTypeView",
+                    error=str(e),
+                )
 
     @discord.ui.button(label="Recent Images", style=discord.ButtonStyle.primary)
     async def recent_images_button(
