@@ -27,6 +27,9 @@ logger = get_logger(__name__)
 EMBED_COLOR_ERROR = 0xE91515
 EMBED_COLOR_INFO = 0x3498DB
 
+# Timeout for image generation API calls (seconds)
+API_TIMEOUT_SECONDS = 180
+
 
 def get_user_info(user: dict[str, Any] | None) -> tuple[str, int, str]:
     """Get username, user ID, and avatar from a user dict.
@@ -76,7 +79,8 @@ class InfoEmbedView(discord.ui.View):
         full_prompt_url: str | None = None,
         download_url: str | None = None,
     ) -> None:
-        super().__init__()
+        # timeout=None ensures download button remains functional indefinitely
+        super().__init__(timeout=None)
         self.user = user
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.title = title
@@ -270,7 +274,8 @@ class ImageSelectionTypeView(discord.ui.View):
         ) = None,
         repo: "RepositoryAdapter | None" = None,
     ) -> None:
-        super().__init__()
+        # timeout=None ensures download button remains functional indefinitely
+        super().__init__(timeout=None)
         self.user = user
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.embed: discord.Embed | None = None
@@ -417,7 +422,8 @@ class ImageCarouselView(discord.ui.View):
             | None
         ) = None,
     ) -> None:
-        super().__init__()
+        # timeout=None ensures download button remains functional indefinitely
+        super().__init__(timeout=None)
         self.user = user
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.embed: discord.Embed | None = None
@@ -633,7 +639,8 @@ class ImageEditTypeView(discord.ui.View):
             Callable[[discord.Interaction], Coroutine[Any, Any, None]] | None
         ) = None,
     ) -> None:
-        super().__init__()
+        # timeout=None ensures download button remains functional indefinitely
+        super().__init__(timeout=None)
         self.image_data = image_data
         self.image_data_list = image_data_list or [image_data]
         self.user = user
@@ -795,7 +802,8 @@ class ImageEditPromptModal(discord.ui.Modal, title="Image Edit Instructions"):
             Callable[[discord.Interaction, str, str], Coroutine[Any, Any, None]] | None
         ) = None,
     ) -> None:
-        super().__init__()
+        # timeout=None ensures download button remains functional indefinitely
+        super().__init__(timeout=None)
         self.image_data = image_data
         self.edit_type = edit_type
         self.user = user
@@ -859,7 +867,8 @@ class ImageEditPerformView(discord.ui.View):
         image_data_list: list[dict[str, str]] | None = None,
         gcs_adapter: "GCSAdapter | None" = None,
     ) -> None:
-        super().__init__()
+        # timeout=None ensures download button remains functional indefinitely
+        super().__init__(timeout=None)
         self.interaction = interaction
         self.prompt = prompt
         self.message = message
