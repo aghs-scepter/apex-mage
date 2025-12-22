@@ -3,9 +3,11 @@
 import asyncio
 import base64
 import io
+import json
 from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
+import aiohttp
 import discord
 
 from src.core.image_utils import (
@@ -1662,6 +1664,17 @@ class GoogleResultsCarouselView(discord.ui.View):
 
     async def initialize(self, interaction: discord.Interaction) -> None:
         """Initialize the Google results carousel view."""
+        # Load existing context URLs for deduplication
+        if self.repo and interaction.channel_id is not None:
+            self.existing_context_urls = await self.repo.get_image_source_urls_in_context(
+                interaction.channel_id
+            )
+            logger.debug(
+                "loaded_existing_urls",
+                view="GoogleResultsCarouselView",
+                count=len(self.existing_context_urls),
+            )
+
         if not self.healthy:
             self.embed = await self.create_error_embed(
                 f"No images found for: {self.query}"
@@ -1689,9 +1702,25 @@ class GoogleResultsCarouselView(discord.ui.View):
         logger.debug("view_initialized", view="GoogleResultsCarouselView")
 
     def update_buttons(self) -> None:
-        """Update button states based on current position."""
+        """Update button states based on current position and context status."""
+        # Navigation buttons
         self.previous_button.disabled = self.current_index <= 0
         self.next_button.disabled = self.current_index >= len(self.results) - 1
+
+        # Add to Context button - check if current image is already in context
+        current_url = self.get_current_result().get("url", "")
+        is_in_context = (
+            current_url in self.added_urls or current_url in self.existing_context_urls
+        )
+
+        if is_in_context:
+            self.add_to_context_button.label = "Already in Context"
+            self.add_to_context_button.disabled = True
+            self.add_to_context_button.style = discord.ButtonStyle.secondary
+        else:
+            self.add_to_context_button.label = "Add to Context"
+            self.add_to_context_button.disabled = False
+            self.add_to_context_button.style = discord.ButtonStyle.success
 
     def disable_buttons(self) -> None:
         """Disable all navigation and action buttons."""
@@ -1763,22 +1792,168 @@ class GoogleResultsCarouselView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button["GoogleResultsCarouselView"],
     ) -> None:
-        """Add current image to context."""
+        """Add current image to context.
+
+        Downloads the image from URL, converts to base64, and stores it
+        in the channel's image context. Updates button state to show
+        "Added" confirmation, then "Already in Context" for future views.
+        """
         if self.user_id != interaction.user.id:
             await interaction.response.send_message(
                 f"Only the original requester ({self.username}) can use this.",
                 ephemeral=True,
             )
             return
+
         await interaction.response.defer()
+
+        current_result = self.get_current_result()
+        image_url = current_result.get("url", "")
+
+        # Check if already in context (shouldn't happen if button is disabled, but be safe)
+        if image_url in self.added_urls or image_url in self.existing_context_urls:
+            logger.debug(
+                "image_already_in_context",
+                view="GoogleResultsCarouselView",
+                url=image_url,
+            )
+            return
+
+        # Call callback if provided (for custom handling)
         if self.on_add_to_context:
-            await self.on_add_to_context(interaction, self.get_current_result(), self)
+            await self.on_add_to_context(interaction, current_result, self)
+
+        # Only proceed with storage if we have a repo and channel_id
+        if self.repo and interaction.channel_id is not None:
+            try:
+                # Download image and convert to base64
+                image_b64 = await self._download_image_as_base64(image_url)
+
+                # Compress the image
+                image_b64 = await asyncio.to_thread(compress_image, image_b64)
+
+                # Generate filename from URL or use default
+                filename = self._generate_filename_from_url(image_url)
+
+                # Create image data dict with source_url for deduplication
+                image_data = {
+                    "filename": filename,
+                    "image": image_b64,
+                    "source_url": image_url,
+                }
+                images = [image_data]
+                str_images = json.dumps(images)
+
+                # Ensure channel exists and add image to context
+                await self.repo.create_channel(interaction.channel_id)
+                await self.repo.add_message_with_images(
+                    interaction.channel_id,
+                    "Anthropic",
+                    "prompt",
+                    False,
+                    "Google Image Search Result",
+                    str_images,
+                )
+
+                # Track this URL as added
+                self.added_urls.add(image_url)
+
+                logger.info(
+                    "image_added_to_context",
+                    view="GoogleResultsCarouselView",
+                    url=image_url,
+                    channel_id=interaction.channel_id,
+                )
+
+                # Update button to show "Added" confirmation
+                button.label = "Added \u2713"
+                button.disabled = True
+                button.style = discord.ButtonStyle.secondary
+
+                # Update the view
+                if self.message:
+                    await self.message.edit(view=self)
+
+            except aiohttp.ClientError as e:
+                logger.error(
+                    "image_download_failed",
+                    view="GoogleResultsCarouselView",
+                    url=image_url,
+                    error=str(e),
+                )
+                # Show error to user
+                await interaction.followup.send(
+                    f"Failed to download image: {e}",
+                    ephemeral=True,
+                )
+            except Exception as e:
+                logger.error(
+                    "add_to_context_failed",
+                    view="GoogleResultsCarouselView",
+                    url=image_url,
+                    error=str(e),
+                )
+                await interaction.followup.send(
+                    "Failed to add image to context. Please try again.",
+                    ephemeral=True,
+                )
         else:
             logger.debug(
-                "add_to_context_placeholder",
+                "add_to_context_no_repo",
                 view="GoogleResultsCarouselView",
-                result=self.get_current_result(),
+                result=current_result,
             )
+
+    async def _download_image_as_base64(self, url: str) -> str:
+        """Download an image from URL and convert to base64.
+
+        Args:
+            url: The URL of the image to download.
+
+        Returns:
+            Base64-encoded image data.
+
+        Raises:
+            aiohttp.ClientError: If the download fails.
+        """
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                response.raise_for_status()
+                data = await response.read()
+                return base64.b64encode(data).decode("utf-8")
+
+    def _generate_filename_from_url(self, url: str) -> str:
+        """Generate a filename from a URL.
+
+        Attempts to extract the filename from the URL path. Falls back to
+        a default filename if extraction fails.
+
+        Args:
+            url: The URL to extract filename from.
+
+        Returns:
+            A filename ending in .jpeg
+        """
+        try:
+            # Extract path from URL and get the last component
+            from urllib.parse import urlparse
+
+            parsed = urlparse(url)
+            path = parsed.path
+            if path:
+                # Get the last component of the path
+                filename = path.split("/")[-1]
+                # Remove any query parameters that might be in the filename
+                filename = filename.split("?")[0]
+                # Ensure it has an extension
+                if filename and "." in filename:
+                    # Replace extension with .jpeg for consistency
+                    name_without_ext = filename.rsplit(".", 1)[0]
+                    return f"{name_without_ext}.jpeg"
+        except Exception:
+            pass
+        # Default filename
+        return "google_image.jpeg"
 
     @discord.ui.button(label="Edit This Image", style=discord.ButtonStyle.primary, row=1)
     async def edit_image_button(

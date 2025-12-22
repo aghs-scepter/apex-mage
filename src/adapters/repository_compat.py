@@ -627,3 +627,28 @@ class RepositoryAdapter:
         await self._repo.log_search_rejection(
             user_id, channel_id, guild_id, query_text, rejection_reason
         )
+
+    # =========================================================================
+    # Image Context Methods
+    # =========================================================================
+
+    async def get_image_source_urls_in_context(self, channel_id: int) -> set[str]:
+        """Get source URLs of images currently in context for deduplication.
+
+        This method extracts the source_url field from images in the channel's
+        context. Only images that were added from external sources (like Google
+        Image Search) will have a source_url field.
+
+        Args:
+            channel_id: The Discord channel ID.
+
+        Returns:
+            Set of source URLs for images in context. Empty set if no images
+            have source URLs.
+        """
+        images = await self.get_images(channel_id, "All Models")
+        source_urls: set[str] = set()
+        for img in images:
+            if isinstance(img, dict) and "source_url" in img:
+                source_urls.add(img["source_url"])
+        return source_urls
