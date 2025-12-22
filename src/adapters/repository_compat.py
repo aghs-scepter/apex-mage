@@ -26,6 +26,9 @@ WINDOW = 35
 TEXT_VENDOR_NAME = "Anthropic"
 IMAGE_VENDOR_NAME = "Fal.AI"
 
+# Maximum number of images in the carousel per channel
+MAX_CAROUSEL_IMAGES = 10
+
 
 class RepositoryAdapter:
     """Adapter that wraps SQLiteRepository with mem.py-compatible methods.
@@ -154,6 +157,9 @@ class RepositoryAdapter:
     ) -> None:
         """Add a message with images to the database.
 
+        Enforces the carousel image limit (MAX_CAROUSEL_IMAGES). If adding these
+        images would exceed the limit, the oldest images are silently removed.
+
         Args:
             discord_id: The Discord channel ID.
             vendor_name: The AI vendor name (e.g., 'Anthropic').
@@ -175,6 +181,60 @@ class RepositoryAdapter:
         image_urls = json.loads(message_images) if message_images else []
         await self._repo.save_message_with_images(message, image_urls)
         logger.debug("Message with images added to database.")
+
+        # Enforce carousel image limit by deactivating oldest image messages
+        await self._enforce_image_limit(discord_id, vendor_name)
+
+    async def _enforce_image_limit(
+        self,
+        discord_id: int,
+        vendor_name: str,
+    ) -> None:
+        """Enforce the carousel image limit by deactivating oldest messages.
+
+        This method counts all images in active messages for the channel.
+        If the count exceeds MAX_CAROUSEL_IMAGES, it deactivates the oldest
+        image messages until the count is at or below the limit.
+
+        Args:
+            discord_id: The Discord channel ID.
+            vendor_name: The vendor name to filter by.
+        """
+        # Get all image messages (ordered newest first)
+        messages = await self._repo.get_latest_images(
+            discord_id, "All Models", limit=100  # Get more to count all
+        )
+
+        # Count images and track which messages to keep
+        image_count = 0
+        messages_to_keep: list[int] = []
+
+        for msg in messages:
+            msg_image_count = len(msg.images)
+            if image_count + msg_image_count <= MAX_CAROUSEL_IMAGES:
+                image_count += msg_image_count
+                if msg.id is not None:
+                    messages_to_keep.append(msg.id)
+            else:
+                # This message would push us over the limit
+                # Check if we can partially fit (we cannot - must keep whole message)
+                # So we stop here and deactivate this and all older messages
+                break
+
+        # If we have messages beyond the limit, deactivate them
+        if len(messages_to_keep) < len(messages):
+            messages_to_deactivate = [
+                msg.id for msg in messages
+                if msg.id is not None and msg.id not in messages_to_keep
+            ]
+            if messages_to_deactivate:
+                await self._repo.deactivate_image_messages(
+                    discord_id, messages_to_deactivate
+                )
+                logger.debug(
+                    f"Deactivated {len(messages_to_deactivate)} old image messages "
+                    f"for channel {discord_id} to enforce {MAX_CAROUSEL_IMAGES}-image limit."
+                )
 
     async def get_visible_messages(
         self,
@@ -237,6 +297,9 @@ class RepositoryAdapter:
         This method extracts individual image data from messages, suitable for
         display in carousels or other image selection UIs.
 
+        The returned list is limited to MAX_CAROUSEL_IMAGES (10) images,
+        with newest images first (index 0 = newest).
+
         Args:
             discord_id: The Discord channel ID.
             vendor_name: The vendor name to filter by (or 'All Models').
@@ -244,6 +307,7 @@ class RepositoryAdapter:
 
         Returns:
             List of image dicts with 'filename' and 'image' keys.
+            Maximum of MAX_CAROUSEL_IMAGES items returned.
         """
         logger.debug(f"Getting images for channel {discord_id}...")
         messages = await self._repo.get_latest_images(discord_id, vendor_name, limit)
@@ -262,6 +326,8 @@ class RepositoryAdapter:
                             images.append(img_data)
                     except json.JSONDecodeError:
                         pass
+        # Enforce the carousel image limit
+        images = images[:MAX_CAROUSEL_IMAGES]
         logger.debug(f"Retrieved {len(images)} images for channel {discord_id}.")
         return images
 

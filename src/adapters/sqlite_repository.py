@@ -281,6 +281,13 @@ AND (vendor_id = (SELECT vendor_id FROM vendors WHERE vendor_name = ?) Or ? = "A
 ;
 """
 
+_DEACTIVATE_IMAGE_MESSAGES_BY_ID = """
+UPDATE channel_messages
+SET visible = FALSE
+WHERE channel_message_id IN ({placeholders})
+;
+"""
+
 _COUNT_RECENT_TEXT_REQUESTS = """
 SELECT
     COUNT(channel_messages.channel_message_id) AS count
@@ -820,6 +827,37 @@ class SQLiteRepository:
         await asyncio.to_thread(update_sync)
         logger.debug(
             f"Cleared messages for channel {channel_external_id}, vendor {vendor_name}"
+        )
+
+    async def deactivate_image_messages(
+        self,
+        channel_external_id: int,
+        message_ids: list[int],
+    ) -> None:
+        """Soft-delete specific image messages by their IDs.
+
+        Used to enforce the carousel image limit by deactivating the oldest
+        image messages when new images push the count over the limit.
+
+        Args:
+            channel_external_id: The Discord channel ID (used for logging).
+            message_ids: List of message IDs to deactivate.
+        """
+        if not message_ids:
+            return
+
+        conn = self._ensure_connected()
+
+        def update_sync() -> None:
+            # Build the query with correct number of placeholders
+            placeholders = ",".join("?" for _ in message_ids)
+            query = _DEACTIVATE_IMAGE_MESSAGES_BY_ID.format(placeholders=placeholders)
+            conn.execute(query, message_ids)
+            conn.commit()
+
+        await asyncio.to_thread(update_sync)
+        logger.debug(
+            f"Deactivated {len(message_ids)} image messages for channel {channel_external_id}"
         )
 
     # =========================================================================
