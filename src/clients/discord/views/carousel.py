@@ -1565,6 +1565,16 @@ class GoogleResultsCarouselView(discord.ui.View):
             ]
             | None
         ) = None,
+        rate_limiter: "SlidingWindowRateLimiter | None" = None,
+        image_provider: "ImageProvider | None" = None,
+        gcs_adapter: "GCSAdapter | None" = None,
+        on_edit_complete: (
+            Callable[
+                [discord.Interaction, dict[str, Any]],
+                Coroutine[Any, Any, None],
+            ]
+            | None
+        ) = None,
     ) -> None:
         """Initialize the Google results carousel view.
 
@@ -1581,6 +1591,11 @@ class GoogleResultsCarouselView(discord.ui.View):
                 Receives interaction, current result dict, and this view.
             on_return: Callback when user clicks Return.
                 Receives interaction and this view.
+            rate_limiter: Rate limiter for image edits.
+            image_provider: Image provider for calling the modification API.
+            gcs_adapter: GCS adapter for uploading results.
+            on_edit_complete: Callback when image edit completes.
+                Receives interaction and result_data dict.
         """
         super().__init__(timeout=USER_INTERACTION_TIMEOUT)  # 5 minutes
         self.user = user
@@ -1594,6 +1609,10 @@ class GoogleResultsCarouselView(discord.ui.View):
         self.on_add_to_context = on_add_to_context
         self.on_edit_image = on_edit_image
         self.on_return = on_return
+        self.rate_limiter = rate_limiter
+        self.image_provider = image_provider
+        self.gcs_adapter = gcs_adapter
+        self.on_edit_complete = on_edit_complete
         self.healthy = bool(self.results)
         # Track URLs added to context during this session
         self.added_urls: set[str] = set()
@@ -1961,22 +1980,147 @@ class GoogleResultsCarouselView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button["GoogleResultsCarouselView"],
     ) -> None:
-        """Edit current image (add to context then open edit flow)."""
+        """Edit current image (add to context then open edit flow).
+
+        This handler:
+        1. Downloads the image and adds it to context (if not already there)
+        2. Opens the ImageEditPromptModal for the user to enter edit instructions
+        3. On modal submit, performs the image edit via ImageEditPerformView
+        4. Stores the result in channel context via on_edit_complete callback
+        """
         if self.user_id != interaction.user.id:
             await interaction.response.send_message(
                 f"Only the original requester ({self.username}) can use this.",
                 ephemeral=True,
             )
             return
-        await interaction.response.defer()
-        if self.on_edit_image:
-            await self.on_edit_image(interaction, self.get_current_result(), self)
-        else:
-            logger.debug(
-                "edit_image_placeholder",
+
+        current_result = self.get_current_result()
+        image_url = current_result.get("url", "")
+
+        # Download and prepare image for editing
+        try:
+            image_b64 = await self._download_image_as_base64(image_url)
+            image_b64 = await asyncio.to_thread(compress_image, image_b64)
+            filename = self._generate_filename_from_url(image_url)
+        except aiohttp.ClientError as e:
+            logger.error(
+                "edit_image_download_failed",
                 view="GoogleResultsCarouselView",
-                result=self.get_current_result(),
+                url=image_url,
+                error=str(e),
             )
+            await interaction.response.send_message(
+                f"Failed to download image for editing: {e}",
+                ephemeral=True,
+            )
+            return
+        except Exception as e:
+            logger.error(
+                "edit_image_prepare_failed",
+                view="GoogleResultsCarouselView",
+                url=image_url,
+                error=str(e),
+            )
+            await interaction.response.send_message(
+                "Failed to prepare image for editing. Please try again.",
+                ephemeral=True,
+            )
+            return
+
+        # Add to context if not already there
+        if image_url not in self.added_urls and image_url not in self.existing_context_urls:
+            if self.repo and interaction.channel_id is not None:
+                try:
+                    # Create image data dict with source_url for deduplication
+                    context_image_data = {
+                        "filename": filename,
+                        "image": image_b64,
+                        "source_url": image_url,
+                    }
+                    images = [context_image_data]
+                    str_images = json.dumps(images)
+
+                    await self.repo.create_channel(interaction.channel_id)
+                    await self.repo.add_message_with_images(
+                        interaction.channel_id,
+                        "Anthropic",
+                        "prompt",
+                        False,
+                        "Google Image Search Result",
+                        str_images,
+                    )
+
+                    self.added_urls.add(image_url)
+                    logger.info(
+                        "edit_image_added_to_context",
+                        view="GoogleResultsCarouselView",
+                        url=image_url,
+                        channel_id=interaction.channel_id,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "edit_image_context_failed",
+                        view="GoogleResultsCarouselView",
+                        url=image_url,
+                        error=str(e),
+                    )
+                    # Continue with edit even if context add fails
+
+        # Create image data for the edit flow
+        image_data: dict[str, str] = {
+            "filename": filename,
+            "image": image_b64,
+        }
+
+        # Define the callback for when the modal is submitted
+        async def on_modal_submit(
+            modal_interaction: discord.Interaction,
+            edit_type: str,
+            prompt: str,
+        ) -> None:
+            """Handle modal submission - perform the image edit."""
+            if edit_type == "Cancel" or not prompt:
+                return
+
+            await modal_interaction.response.defer()
+
+            if modal_interaction.message is None:
+                logger.error(
+                    "edit_image_no_message",
+                    view="GoogleResultsCarouselView",
+                )
+                return
+
+            # Create and run ImageEditPerformView
+            perform_view = ImageEditPerformView(
+                interaction=modal_interaction,
+                message=modal_interaction.message,
+                user=self.user,
+                image_data=image_data,
+                image_data_list=[image_data],
+                edit_type=edit_type,
+                prompt=prompt,
+                on_complete=self.on_edit_complete,
+                rate_limiter=self.rate_limiter,
+                image_provider=self.image_provider,
+                gcs_adapter=self.gcs_adapter,
+            )
+            await perform_view.initialize(modal_interaction)
+
+        # Open the edit modal (must be the response, cannot defer first)
+        prompt_modal = ImageEditPromptModal(
+            image_data=image_data,
+            edit_type="Edit",
+            user=self.user,
+            message=self.message,
+            on_select=on_modal_submit,
+        )
+        await interaction.response.send_modal(prompt_modal)
+
+        # Call custom callback if provided (for additional handling after modal opens)
+        if self.on_edit_image:
+            await self.on_edit_image(interaction, current_result, self)
 
     @discord.ui.button(label="Return", style=discord.ButtonStyle.secondary, row=1)
     async def return_button(
