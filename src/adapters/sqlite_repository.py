@@ -115,6 +115,33 @@ CREATE TABLE IF NOT EXISTS behavior_presets (
 );
 """
 
+_CREATE_SEARCH_REJECTIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS search_rejections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    guild_id INTEGER,
+    query_text TEXT NOT NULL,
+    rejection_reason TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+_CREATE_SEARCH_REJECTIONS_USER_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_search_rejections_user_id
+ON search_rejections(user_id);
+"""
+
+_CREATE_SEARCH_REJECTIONS_CHANNEL_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_search_rejections_channel_id
+ON search_rejections(channel_id);
+"""
+
+_CREATE_SEARCH_REJECTIONS_CREATED_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_search_rejections_created_at
+ON search_rejections(created_at);
+"""
+
 # =============================================================================
 # SQL Query Definitions
 # =============================================================================
@@ -402,6 +429,12 @@ DELETE FROM behavior_presets
 WHERE guild_id = ? AND name = ?;
 """
 
+# Search rejections queries
+_INSERT_SEARCH_REJECTION = """
+INSERT INTO search_rejections (user_id, channel_id, guild_id, query_text, rejection_reason)
+VALUES (?, ?, ?, ?, ?);
+"""
+
 
 # =============================================================================
 # Repository Implementation
@@ -490,6 +523,10 @@ class SQLiteRepository:
             self._connection.execute(_CREATE_BANS_TABLE)
             self._connection.execute(_CREATE_BAN_HISTORY_TABLE)
             self._connection.execute(_CREATE_BEHAVIOR_PRESETS_TABLE)
+            self._connection.execute(_CREATE_SEARCH_REJECTIONS_TABLE)
+            self._connection.execute(_CREATE_SEARCH_REJECTIONS_USER_INDEX)
+            self._connection.execute(_CREATE_SEARCH_REJECTIONS_CHANNEL_INDEX)
+            self._connection.execute(_CREATE_SEARCH_REJECTIONS_CREATED_INDEX)
             self._connection.commit()
 
         await asyncio.to_thread(init_sync)
@@ -1224,3 +1261,41 @@ class SQLiteRepository:
 
         await asyncio.to_thread(delete_sync)
         logger.debug(f"Deleted behavior preset '{name}' for guild {guild_id}")
+
+    # =========================================================================
+    # SearchRejectionRepository Implementation
+    # =========================================================================
+
+    async def log_search_rejection(
+        self,
+        user_id: int,
+        channel_id: int,
+        guild_id: int | None,
+        query_text: str,
+        rejection_reason: str,
+    ) -> None:
+        """Log a search rejection for content screening.
+
+        Records when a user's search query is rejected by the content
+        screening system. This is used for auditing and analytics.
+
+        Args:
+            user_id: The Discord user ID who made the query.
+            channel_id: The Discord channel ID where the query was made.
+            guild_id: The Discord guild ID (None for DMs).
+            query_text: The search query that was rejected.
+            rejection_reason: The reason the query was rejected.
+        """
+        conn = self._ensure_connected()
+
+        def insert_sync() -> None:
+            conn.execute(
+                _INSERT_SEARCH_REJECTION,
+                (user_id, channel_id, guild_id, query_text, rejection_reason),
+            )
+            conn.commit()
+
+        await asyncio.to_thread(insert_sync)
+        logger.debug(
+            f"Logged search rejection for user {user_id} in channel {channel_id}"
+        )

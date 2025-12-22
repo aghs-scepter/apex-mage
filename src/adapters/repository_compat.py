@@ -599,3 +599,31 @@ class RepositoryAdapter:
             name: The preset name to delete.
         """
         await self._repo.delete_preset(guild_id, name)
+
+    # =========================================================================
+    # Search Rejection Logging Methods
+    # =========================================================================
+
+    async def log_search_rejection(
+        self,
+        user_id: int,
+        channel_id: int,
+        guild_id: int | None,
+        query_text: str,
+        rejection_reason: str,
+    ) -> None:
+        """Log a search rejection for content screening.
+
+        Records when a user's search query is rejected by the content
+        screening system. This is used for auditing and analytics.
+
+        Args:
+            user_id: The Discord user ID who made the query.
+            channel_id: The Discord channel ID where the query was made.
+            guild_id: The Discord guild ID (None for DMs).
+            query_text: The search query that was rejected.
+            rejection_reason: The reason the query was rejected.
+        """
+        await self._repo.log_search_rejection(
+            user_id, channel_id, guild_id, query_text, rejection_reason
+        )

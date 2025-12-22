@@ -1251,3 +1251,133 @@ class TestBehaviorPresetRepository:
         # Guild 2's list should be empty
         result = await repo.list_presets("guild2")
         assert result == []
+
+
+# =============================================================================
+# SearchRejectionRepository Tests
+# =============================================================================
+
+
+class TestSearchRejectionRepository:
+    """Tests for SearchRejectionRepository methods."""
+
+    async def test_log_search_rejection_basic(self, repo: SQLiteRepository) -> None:
+        """Test that log_search_rejection inserts a record successfully."""
+        await repo.log_search_rejection(
+            user_id=123456789,
+            channel_id=987654321,
+            guild_id=111222333,
+            query_text="inappropriate search",
+            rejection_reason="Content violates guidelines",
+        )
+
+        # Verify the record was inserted by querying directly
+        conn = repo._ensure_connected()
+        cursor = conn.execute(
+            "SELECT * FROM search_rejections WHERE user_id = ?",
+            (123456789,),
+        )
+        row = cursor.fetchone()
+
+        assert row is not None
+        assert row["user_id"] == 123456789
+        assert row["channel_id"] == 987654321
+        assert row["guild_id"] == 111222333
+        assert row["query_text"] == "inappropriate search"
+        assert row["rejection_reason"] == "Content violates guidelines"
+        assert row["created_at"] is not None
+
+    async def test_log_search_rejection_null_guild_id(
+        self, repo: SQLiteRepository
+    ) -> None:
+        """Test that log_search_rejection accepts None for guild_id (DMs)."""
+        await repo.log_search_rejection(
+            user_id=123456789,
+            channel_id=987654321,
+            guild_id=None,  # DM context
+            query_text="dm search",
+            rejection_reason="Not allowed in DMs",
+        )
+
+        conn = repo._ensure_connected()
+        cursor = conn.execute(
+            "SELECT * FROM search_rejections WHERE user_id = ?",
+            (123456789,),
+        )
+        row = cursor.fetchone()
+
+        assert row is not None
+        assert row["guild_id"] is None
+
+    async def test_log_search_rejection_multiple_records(
+        self, repo: SQLiteRepository
+    ) -> None:
+        """Test that multiple rejections can be logged."""
+        await repo.log_search_rejection(
+            user_id=111,
+            channel_id=222,
+            guild_id=333,
+            query_text="first query",
+            rejection_reason="Reason 1",
+        )
+        await repo.log_search_rejection(
+            user_id=111,
+            channel_id=222,
+            guild_id=333,
+            query_text="second query",
+            rejection_reason="Reason 2",
+        )
+        await repo.log_search_rejection(
+            user_id=444,
+            channel_id=555,
+            guild_id=666,
+            query_text="third query",
+            rejection_reason="Reason 3",
+        )
+
+        conn = repo._ensure_connected()
+        cursor = conn.execute("SELECT COUNT(*) as count FROM search_rejections")
+        row = cursor.fetchone()
+
+        assert row["count"] == 3
+
+    async def test_log_search_rejection_preserves_special_characters(
+        self, repo: SQLiteRepository
+    ) -> None:
+        """Test that special characters in query_text are preserved."""
+        special_query = "test with 'quotes' and \"double quotes\" and unicode: "
+        special_reason = "Contains <html> & special; chars"
+
+        await repo.log_search_rejection(
+            user_id=123,
+            channel_id=456,
+            guild_id=789,
+            query_text=special_query,
+            rejection_reason=special_reason,
+        )
+
+        conn = repo._ensure_connected()
+        cursor = conn.execute(
+            "SELECT query_text, rejection_reason FROM search_rejections WHERE user_id = ?",
+            (123,),
+        )
+        row = cursor.fetchone()
+
+        assert row["query_text"] == special_query
+        assert row["rejection_reason"] == special_reason
+
+    async def test_search_rejections_indexes_exist(
+        self, repo: SQLiteRepository
+    ) -> None:
+        """Test that the required indexes are created."""
+        conn = repo._ensure_connected()
+
+        # Query the SQLite master table for index names
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='search_rejections'"
+        )
+        indexes = {row["name"] for row in cursor.fetchall()}
+
+        assert "idx_search_rejections_user_id" in indexes
+        assert "idx_search_rejections_channel_id" in indexes
+        assert "idx_search_rejections_created_at" in indexes
