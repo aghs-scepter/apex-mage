@@ -1520,3 +1520,310 @@ class PresetSelectView(discord.ui.View):
 
         await interaction.followup.send(embed=self.embed, view=self)
         self.message = await interaction.original_response()
+
+
+class GoogleResultsCarouselView(discord.ui.View):
+    """Carousel view for displaying Google Image search results.
+
+    Displays one image at a time from search results with navigation
+    and action buttons. Images are displayed from URLs rather than
+    base64 data.
+    """
+
+    def __init__(
+        self,
+        interaction: discord.Interaction,
+        results: list[dict[str, str]],
+        query: str,
+        user: dict[str, Any] | None = None,
+        message: discord.Message | None = None,
+        on_add_to_context: (
+            Callable[
+                [discord.Interaction, dict[str, str], "GoogleResultsCarouselView"],
+                Coroutine[Any, Any, None],
+            ]
+            | None
+        ) = None,
+        on_edit_image: (
+            Callable[
+                [discord.Interaction, dict[str, str], "GoogleResultsCarouselView"],
+                Coroutine[Any, Any, None],
+            ]
+            | None
+        ) = None,
+        on_return: (
+            Callable[
+                [discord.Interaction, "GoogleResultsCarouselView"],
+                Coroutine[Any, Any, None],
+            ]
+            | None
+        ) = None,
+    ) -> None:
+        """Initialize the Google results carousel view.
+
+        Args:
+            interaction: The Discord interaction that triggered this view.
+            results: List of image result dicts with 'url' and optional 'title' keys.
+            query: The search query that produced these results.
+            user: Optional user dict with 'name', 'id', and 'pfp' keys.
+            message: Optional message to edit when updating the view.
+            on_add_to_context: Callback when user clicks Add to Context.
+                Receives interaction, current result dict, and this view.
+            on_edit_image: Callback when user clicks Edit This Image.
+                Receives interaction, current result dict, and this view.
+            on_return: Callback when user clicks Return.
+                Receives interaction and this view.
+        """
+        super().__init__(timeout=USER_INTERACTION_TIMEOUT)  # 5 minutes
+        self.user = user
+        self.username, self.user_id, self.pfp = get_user_info(user)
+        self.embed: discord.Embed | None = None
+        self.results = results
+        self.query = query
+        self.current_index = 0
+        self.message = message
+        self.on_add_to_context = on_add_to_context
+        self.on_edit_image = on_edit_image
+        self.on_return = on_return
+        self.healthy = bool(self.results)
+
+    def generate_chrono_bar(self) -> str:
+        """Generate a visual position indicator for the carousel.
+
+        Uses bold brackets to indicate current position:
+        - Circle = image position
+        - **[(**circle**)]** = current position (bold brackets)
+
+        Example (viewing image 2 of 5):
+            (1) circle **[(**circle**)]** circle circle circle (5)
+        """
+        symbols = []
+        for i in range(len(self.results)):
+            is_current = i == self.current_index
+            symbol = "\u25cb"  # White circle
+
+            if is_current:
+                symbol = f"**[(**{symbol}**)]**"
+
+            symbols.append(symbol)
+
+        return f"(1) {' '.join(symbols)} ({len(self.results)})"
+
+    async def create_embed(self) -> discord.Embed:
+        """Create the carousel embed with current image."""
+        current_result = self.results[self.current_index]
+        image_url = current_result.get("url", "")
+        image_title = current_result.get("title", "")
+
+        embed = discord.Embed(
+            title=f"Searching for: {self.query}",
+            description=self.generate_chrono_bar(),
+        )
+        embed.set_author(
+            name=f"{self.username} (via Apex Mage)",
+            url="https://github.com/aghs-scepter/apex-mage",
+            icon_url=self.pfp,
+        )
+
+        # Set image from URL
+        if image_url:
+            embed.set_image(url=image_url)
+
+        # Add title as footer if available
+        if image_title:
+            embed.set_footer(text=image_title)
+
+        return embed
+
+    async def create_error_embed(self, error_message: str) -> discord.Embed:
+        """Create an error embed."""
+        embed = discord.Embed(
+            title="Search Error",
+            description=error_message,
+            color=EMBED_COLOR_ERROR,
+        )
+        embed.set_author(
+            name=f"{self.username} (via Apex Mage)",
+            url="https://github.com/aghs-scepter/apex-mage",
+            icon_url=self.pfp,
+        )
+        return embed
+
+    async def initialize(self, interaction: discord.Interaction) -> None:
+        """Initialize the Google results carousel view."""
+        if not self.healthy:
+            self.embed = await self.create_error_embed(
+                f"No images found for: {self.query}"
+            )
+            self.hide_buttons()
+            logger.error("carousel_no_results", view="GoogleResultsCarouselView")
+        else:
+            self.embed = await self.create_embed()
+            self.update_buttons()
+            logger.debug("embed_created", view="GoogleResultsCarouselView")
+
+        if self.message:
+            await self.message.edit(
+                embed=self.embed,
+                attachments=[],  # Clear any previous attachments
+                view=self,
+            )
+        else:
+            # Send as new message via followup
+            self.message = await interaction.followup.send(
+                embed=self.embed,
+                view=self,
+                wait=True,
+            )
+        logger.debug("view_initialized", view="GoogleResultsCarouselView")
+
+    def update_buttons(self) -> None:
+        """Update button states based on current position."""
+        self.previous_button.disabled = self.current_index <= 0
+        self.next_button.disabled = self.current_index >= len(self.results) - 1
+
+    def disable_buttons(self) -> None:
+        """Disable all navigation and action buttons."""
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+
+    def hide_buttons(self) -> None:
+        """Remove all buttons from the view."""
+        self.clear_items()
+
+    async def update_embed(self) -> None:
+        """Update the embed with the current image after navigation."""
+        self.embed = await self.create_embed()
+        self.update_buttons()
+
+        if self.message:
+            await self.message.edit(
+                embed=self.embed,
+                attachments=[],
+                view=self,
+            )
+
+    def get_current_result(self) -> dict[str, str]:
+        """Get the current image result dict."""
+        return self.results[self.current_index]
+
+    # Row 0: Navigation buttons
+    @discord.ui.button(label="\u25c0", style=discord.ButtonStyle.primary, row=0)
+    async def previous_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["GoogleResultsCarouselView"],
+    ) -> None:
+        """Navigate to previous image."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        if self.current_index > 0:
+            self.current_index -= 1
+            await self.update_embed()
+
+    @discord.ui.button(label="\u25b6", style=discord.ButtonStyle.primary, row=0)
+    async def next_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["GoogleResultsCarouselView"],
+    ) -> None:
+        """Navigate to next image."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        if self.current_index < len(self.results) - 1:
+            self.current_index += 1
+            await self.update_embed()
+
+    # Row 1: Action buttons
+    @discord.ui.button(label="Add to Context", style=discord.ButtonStyle.success, row=1)
+    async def add_to_context_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["GoogleResultsCarouselView"],
+    ) -> None:
+        """Add current image to context."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        if self.on_add_to_context:
+            await self.on_add_to_context(interaction, self.get_current_result(), self)
+        else:
+            logger.debug(
+                "add_to_context_placeholder",
+                view="GoogleResultsCarouselView",
+                result=self.get_current_result(),
+            )
+
+    @discord.ui.button(label="Edit This Image", style=discord.ButtonStyle.primary, row=1)
+    async def edit_image_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["GoogleResultsCarouselView"],
+    ) -> None:
+        """Edit current image (add to context then open edit flow)."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        if self.on_edit_image:
+            await self.on_edit_image(interaction, self.get_current_result(), self)
+        else:
+            logger.debug(
+                "edit_image_placeholder",
+                view="GoogleResultsCarouselView",
+                result=self.get_current_result(),
+            )
+
+    @discord.ui.button(label="Return", style=discord.ButtonStyle.secondary, row=1)
+    async def return_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["GoogleResultsCarouselView"],
+    ) -> None:
+        """Return to the initial embed (ImageSelectionTypeView)."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        if self.on_return:
+            await self.on_return(interaction, self)
+        else:
+            logger.debug(
+                "return_placeholder",
+                view="GoogleResultsCarouselView",
+            )
+
+    async def on_timeout(self) -> None:
+        """Update the embed on timeout."""
+        self.hide_buttons()
+        if self.embed:
+            self.embed.title = "Session Expired"
+            self.embed.description = "This search session has timed out. Please start again."
+            self.embed.set_image(url=None)
+            self.embed.set_footer(text=None)
+        if self.message:
+            try:
+                await self.message.edit(embed=self.embed, attachments=[], view=self)
+            except Exception:
+                pass  # Message may have been deleted
