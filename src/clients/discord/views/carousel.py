@@ -190,6 +190,47 @@ class UnauthorizedModal(discord.ui.Modal):
         await interaction.response.defer()
 
 
+class GoogleSearchModal(discord.ui.Modal, title="Google Image Search"):
+    """Modal for entering Google Image search query."""
+
+    def __init__(
+        self,
+        on_submit: Callable[[discord.Interaction, str], Coroutine[Any, Any, None]],
+    ) -> None:
+        super().__init__()
+        self.on_submit_callback = on_submit
+
+        self.query: discord.ui.TextInput[GoogleSearchModal] = discord.ui.TextInput(
+            label="Enter your search query:",
+            style=discord.TextStyle.short,
+            max_length=200,
+            required=True,
+            placeholder="e.g., sunset over mountains",
+        )
+        self.add_item(self.query)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        """Handle modal submission."""
+        await self.on_submit_callback(interaction, self.query.value)
+
+    async def on_error(  # type: ignore[override]
+        self, interaction: discord.Interaction, error: Exception
+    ) -> None:
+        """Handle errors during modal submission."""
+        logger.error("modal_error", view="GoogleSearchModal", error=str(error))
+
+        try:
+            await interaction.response.send_message(
+                "An error occurred while processing your search. Please try again.",
+                ephemeral=True,
+            )
+        except discord.errors.InteractionResponded:
+            await interaction.followup.send(
+                "An error occurred while processing your search. Please try again.",
+                ephemeral=True,
+            )
+
+
 class ClearHistoryConfirmationView(discord.ui.View):
     """View for confirming history clear operation."""
 
