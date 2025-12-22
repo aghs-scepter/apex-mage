@@ -20,6 +20,35 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+
+def _strip_markdown_json(response: str) -> str:
+    """Strip markdown code block wrappers from JSON response.
+
+    Handles these formats:
+    - ```json\\n{...}\\n``` (with language tag)
+    - ```\\n{...}\\n``` (without language tag)
+    - {...} (raw JSON, returned unchanged)
+
+    Args:
+        response: The response text, possibly wrapped in markdown code blocks.
+
+    Returns:
+        The extracted JSON string with code block markers removed.
+    """
+    response = response.strip()
+    # Handle ```json ... ``` or ``` ... ```
+    if response.startswith("```"):
+        # Find the end of the opening fence
+        first_newline = response.find("\n")
+        if first_newline != -1:
+            # Strip opening fence (```json or ```)
+            response = response[first_newline + 1 :]
+        # Strip closing fence
+        if response.endswith("```"):
+            response = response[:-3]
+    return response.strip()
+
+
 # Model to use for content screening
 SCREENING_MODEL = "claude-haiku-4-5-20251001"
 
@@ -105,6 +134,9 @@ async def screen_search_query(query: str) -> ScreeningResult:
             )
 
         response_text = response.content[0].text.strip()
+
+        # Strip markdown code blocks if present (Haiku sometimes wraps JSON)
+        response_text = _strip_markdown_json(response_text)
 
         # Parse JSON response
         try:

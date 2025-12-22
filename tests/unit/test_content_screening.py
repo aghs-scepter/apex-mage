@@ -14,7 +14,55 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from anthropic import APIStatusError
 
-from src.core.content_screening import ScreeningResult, screen_search_query
+from src.core.content_screening import (
+    ScreeningResult,
+    _strip_markdown_json,
+    screen_search_query,
+)
+
+
+class TestStripMarkdownJson:
+    """Tests for _strip_markdown_json helper function."""
+
+    def test_raw_json_unchanged(self) -> None:
+        """Test that raw JSON is returned unchanged."""
+        raw_json = '{"allowed": true}'
+        assert _strip_markdown_json(raw_json) == raw_json
+
+    def test_json_with_language_tag(self) -> None:
+        """Test stripping ```json ... ``` wrapper."""
+        wrapped = '```json\n{"allowed": true}\n```'
+        assert _strip_markdown_json(wrapped) == '{"allowed": true}'
+
+    def test_json_without_language_tag(self) -> None:
+        """Test stripping ``` ... ``` wrapper without language tag."""
+        wrapped = '```\n{"allowed": true}\n```'
+        assert _strip_markdown_json(wrapped) == '{"allowed": true}'
+
+    def test_preserves_json_content(self) -> None:
+        """Test that JSON content with special characters is preserved."""
+        wrapped = '```json\n{"allowed": false, "reason": "Contains harmful content"}\n```'
+        expected = '{"allowed": false, "reason": "Contains harmful content"}'
+        assert _strip_markdown_json(wrapped) == expected
+
+    def test_handles_extra_whitespace(self) -> None:
+        """Test that extra whitespace is trimmed."""
+        wrapped = '  \n```json\n{"allowed": true}\n```  \n'
+        assert _strip_markdown_json(wrapped) == '{"allowed": true}'
+
+    def test_handles_multiline_json(self) -> None:
+        """Test that multiline JSON inside code block is handled."""
+        wrapped = '```json\n{\n  "allowed": true,\n  "reason": null\n}\n```'
+        expected = '{\n  "allowed": true,\n  "reason": null\n}'
+        assert _strip_markdown_json(wrapped) == expected
+
+    def test_no_newline_after_fence(self) -> None:
+        """Test edge case where no newline after opening fence."""
+        # Edge case: ```{"allowed": true}``` (no newline)
+        wrapped = '```{"allowed": true}```'
+        # In this case, find("\n") returns -1, so we don't strip opening fence
+        # The function returns it stripped of trailing ```
+        assert _strip_markdown_json(wrapped) == '```{"allowed": true}'
 
 
 class TestScreeningResult:
@@ -287,3 +335,71 @@ class TestScreenSearchQuery:
 
             assert result.allowed is True
             assert result.reason is None
+
+    @pytest.mark.asyncio
+    async def test_markdown_wrapped_json_with_language_tag(self) -> None:
+        """Test that JSON wrapped in ```json ... ``` is parsed correctly."""
+        with patch(
+            "src.core.content_screening.AsyncAnthropic"
+        ) as mock_client_class:
+            # Mock response with markdown code block and language tag
+            mock_response = MagicMock()
+            mock_response.content = [
+                MagicMock(text='```json\n{"allowed": true}\n```')
+            ]
+
+            mock_client = MagicMock()
+            mock_client.messages.create = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value = mock_client
+
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+                result = await screen_search_query("test query")
+
+            assert result.allowed is True
+            assert result.reason is None
+
+    @pytest.mark.asyncio
+    async def test_markdown_wrapped_json_without_language_tag(self) -> None:
+        """Test that JSON wrapped in ``` ... ``` is parsed correctly."""
+        with patch(
+            "src.core.content_screening.AsyncAnthropic"
+        ) as mock_client_class:
+            # Mock response with markdown code block without language tag
+            mock_response = MagicMock()
+            mock_response.content = [
+                MagicMock(text='```\n{"allowed": true}\n```')
+            ]
+
+            mock_client = MagicMock()
+            mock_client.messages.create = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value = mock_client
+
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+                result = await screen_search_query("test query")
+
+            assert result.allowed is True
+            assert result.reason is None
+
+    @pytest.mark.asyncio
+    async def test_markdown_wrapped_blocked_response(self) -> None:
+        """Test that blocked JSON wrapped in markdown is parsed correctly."""
+        with patch(
+            "src.core.content_screening.AsyncAnthropic"
+        ) as mock_client_class:
+            # Mock blocked response with markdown wrapper
+            mock_response = MagicMock()
+            mock_response.content = [
+                MagicMock(
+                    text='```json\n{"allowed": false, "reason": "Harmful content"}\n```'
+                )
+            ]
+
+            mock_client = MagicMock()
+            mock_client.messages.create = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value = mock_client
+
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+                result = await screen_search_query("test query")
+
+            assert result.allowed is False
+            assert result.reason == "Harmful content"
