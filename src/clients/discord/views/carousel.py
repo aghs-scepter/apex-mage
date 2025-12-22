@@ -1121,14 +1121,14 @@ class MultiImageCarouselView(discord.ui.View):
     def generate_image_chrono_bar(self) -> str:
         """Generate a single-line chronological bar showing position and selection.
 
-        Uses brackets to indicate current position:
+        Uses bold brackets to indicate current position:
         - \u25cb = not selected, not current
         - \u2713 = selected, not current
-        - [(\u25cb)] = current position, not selected
-        - [(\u2713)] = current position, selected
+        - **[(**\u25cb**)]** = current position, not selected (bold brackets)
+        - **[(**\u2713**)]** = current position, selected (bold brackets)
 
         Example (viewing image 3, images 2 and 5 selected of 5 total):
-            (Newest) \u25cb \u2713 [(\u25cb)] \u25cb \u2713 (Oldest)
+            (Newest) \u25cb \u2713 **[(**\u25cb**)]** \u25cb \u2713 (Oldest)
         """
         symbols = []
         for i in range(len(self.files)):
@@ -1141,7 +1141,7 @@ class MultiImageCarouselView(discord.ui.View):
                 symbol = "\u25cb"  # White circle
 
             if is_current:
-                symbol = f"[({symbol})]"
+                symbol = f"**[(**{symbol}**)]**"
 
             symbols.append(symbol)
 
