@@ -1091,7 +1091,8 @@ class MultiImageCarouselView(discord.ui.View):
             initial_selections: Optional list of pre-selected image indices
                 for restoring state when navigating back.
         """
-        super().__init__(timeout=180.0)
+        # User has 5 minutes to make selections
+        super().__init__(timeout=USER_INTERACTION_TIMEOUT)
         self.user = user
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.embed: discord.Embed | None = None
