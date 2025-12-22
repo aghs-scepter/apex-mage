@@ -392,7 +392,7 @@ class ImageSelectionTypeView(discord.ui.View):
         self.hide_buttons()
         await interaction.response.edit_message(embed=self.embed, view=self)
 
-    @discord.ui.button(label="Google", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="Google Search", style=discord.ButtonStyle.primary)
     async def google_search_button(
         self,
         interaction: discord.Interaction,
