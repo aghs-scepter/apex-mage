@@ -3391,3 +3391,901 @@ class SummarizePreviewView(discord.ui.View):
                 await self.message.edit(embed=self.embed, view=self)
             except Exception:
                 pass  # Message may have been deleted
+
+
+class DescribeImageSourceView(discord.ui.View):
+    """View for selecting an image source for the /describe_this command.
+
+    Provides options to select an image from recent images, Google search,
+    or upload directly via the command. The selected image will be sent
+    to B3 (description display) for processing.
+    """
+
+    def __init__(
+        self,
+        interaction: discord.Interaction,
+        user: dict[str, Any] | None = None,
+        on_image_selected: (
+            Callable[
+                [discord.Interaction, dict[str, str]],
+                Coroutine[Any, Any, None],
+            ]
+            | None
+        ) = None,
+        repo: "RepositoryAdapter | None" = None,
+    ) -> None:
+        """Initialize the describe image source view.
+
+        Args:
+            interaction: The Discord interaction that triggered this view.
+            user: Optional user dict with 'name', 'id', and 'pfp' keys.
+            on_image_selected: Callback when an image is selected.
+                Receives the interaction and image data dict with
+                'filename' and 'image' (base64) keys.
+            repo: Repository adapter for fetching recent images.
+        """
+        super().__init__(timeout=USER_INTERACTION_TIMEOUT)
+        self.user = user
+        self.username, self.user_id, self.pfp = get_user_info(user)
+        self.embed: discord.Embed | None = None
+        self.message: discord.Message | None = None
+        self.on_image_selected = on_image_selected
+        self.repo = repo
+        self.carousel_files: list[dict[str, str]] = []
+
+    async def initialize(self, interaction: discord.Interaction) -> None:
+        """Initialize the describe image source view."""
+        self.embed = discord.Embed(
+            title="Describe an Image",
+            description=(
+                "Select how you want to choose an image to describe.\n\n"
+                "**Tip:** You can also run `/describe_this` with an image "
+                "attachment to describe it directly."
+            ),
+        )
+        self.embed.set_author(
+            name=f"{self.username} (via Apex Mage)",
+            url="https://github.com/aghs-scepter/apex-mage",
+            icon_url=self.pfp,
+        )
+
+        # Check if the channel has recent images
+        has_recent_images = False
+        if self.repo and interaction.channel_id is not None:
+            has_recent_images = await self.repo.has_images_in_context(
+                interaction.channel_id, "All Models"
+            )
+
+        self.update_buttons(has_recent_images)
+        logger.debug("embed_created", view="DescribeImageSourceView")
+
+        self.message = await interaction.followup.send(
+            embed=self.embed,
+            view=self,
+            wait=True,
+        )
+
+        logger.debug("view_initialized", view="DescribeImageSourceView")
+
+    def update_buttons(self, has_recent_images: bool) -> None:
+        """Update button states based on available images."""
+        self.google_search_button.disabled = False
+        self.recent_images_button.disabled = not has_recent_images
+
+    def disable_buttons(self) -> None:
+        """Disable all selection buttons."""
+        self.google_search_button.disabled = True
+        self.recent_images_button.disabled = True
+        self.cancel_button.disabled = True
+
+    def hide_buttons(self) -> None:
+        """Remove all selection buttons."""
+        self.clear_items()
+
+    @discord.ui.button(label="Google Search", style=discord.ButtonStyle.primary)
+    async def google_search_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescribeImageSourceView"],
+    ) -> None:
+        """Open Google Image search for description."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can select this option.",
+                ephemeral=True,
+            )
+            return
+
+        # Show the GoogleSearchModal
+        modal = GoogleSearchModal(on_submit=self._handle_google_search)
+        await interaction.response.send_modal(modal)
+
+    async def _handle_google_search(
+        self, interaction: discord.Interaction, query: str
+    ) -> None:
+        """Handle Google search query submission for description.
+
+        This method orchestrates the Google Image search flow for image description:
+        1. Show processing message
+        2. Screen the query via Haiku content screening
+        3. If rejected: log to database and show error
+        4. If approved: execute SerpAPI search
+        5. Display results in a carousel for single selection
+
+        Args:
+            interaction: The Discord interaction from the modal submit.
+            query: The search query entered by the user.
+        """
+        from src.core.content_screening import screen_search_query
+        from src.providers.serpapi_provider import SerpAPIError, search_google_images
+
+        await interaction.response.defer()
+
+        # 1. Show processing message
+        if self.embed:
+            self.embed.title = "Google Image Search"
+            self.embed.description = f"Searching for: {query}... Processing"
+        if self.message:
+            await self.message.edit(embed=self.embed, view=None)
+
+        # 2. Screen the query via Haiku
+        try:
+            screening_result = await screen_search_query(query)
+        except Exception as e:
+            logger.error(
+                "content_screening_error",
+                view="DescribeImageSourceView",
+                query=query,
+                error=str(e),
+            )
+            if self.embed:
+                self.embed.title = "Search Blocked"
+                self.embed.description = (
+                    "Content screening service is unavailable. Please try again later."
+                )
+                self.embed.color = EMBED_COLOR_ERROR
+            if self.message:
+                await self.message.edit(embed=self.embed, view=None)
+            return
+
+        if not screening_result.allowed:
+            # Log rejection to database
+            if self.repo and interaction.channel_id is not None:
+                guild_id = interaction.guild_id if interaction.guild else None
+                await self.repo.log_search_rejection(
+                    user_id=interaction.user.id,
+                    channel_id=interaction.channel_id,
+                    guild_id=guild_id,
+                    query_text=query,
+                    rejection_reason=screening_result.reason or "Content policy violation",
+                )
+                logger.info(
+                    "search_query_rejected",
+                    view="DescribeImageSourceView",
+                    user_id=interaction.user.id,
+                    channel_id=interaction.channel_id,
+                    query=query,
+                    reason=screening_result.reason,
+                )
+
+            if self.embed:
+                self.embed.title = "Search Blocked"
+                self.embed.description = (
+                    f"Your search for **{query}** was blocked.\n\n"
+                    f"Reason: {screening_result.reason or 'Content policy violation'}"
+                )
+                self.embed.color = EMBED_COLOR_ERROR
+            if self.message:
+                await self.message.edit(embed=self.embed, view=None)
+            return
+
+        # 3. Execute SerpAPI search
+        try:
+            results = await search_google_images(query, num_results=10)
+        except ValueError as e:
+            logger.error(
+                "serpapi_config_error",
+                view="DescribeImageSourceView",
+                error=str(e),
+            )
+            if self.embed:
+                self.embed.title = "Search Error"
+                self.embed.description = (
+                    "Google Image Search is not configured. "
+                    "Please contact the bot administrator."
+                )
+                self.embed.color = EMBED_COLOR_ERROR
+            if self.message:
+                await self.message.edit(embed=self.embed, view=None)
+            return
+        except SerpAPIError as e:
+            logger.error(
+                "serpapi_search_error",
+                view="DescribeImageSourceView",
+                query=query,
+                error=str(e),
+            )
+            if self.embed:
+                self.embed.title = "Search Error"
+                self.embed.description = "Search failed, please try again."
+                self.embed.color = EMBED_COLOR_ERROR
+            if self.message:
+                await self.message.edit(embed=self.embed, view=None)
+            return
+
+        if not results:
+            if self.embed:
+                self.embed.title = "No Results"
+                self.embed.description = f"No images found for: {query}"
+                self.embed.color = EMBED_COLOR_INFO
+            if self.message:
+                await self.message.edit(embed=self.embed, view=None)
+            return
+
+        # 4. Show results in DescribeGoogleResultsCarouselView for single selection
+        result_dicts = [
+            {
+                "url": r.url,
+                "thumbnail_url": r.thumbnail_url or "",
+                "title": r.title or "",
+                "source_url": r.source_url or "",
+            }
+            for r in results
+        ]
+
+        # Create return callback
+        async def on_return(
+            return_interaction: discord.Interaction,
+            view: "DescribeGoogleResultsCarouselView",
+        ) -> None:
+            """Handle return from carousel to source selection."""
+            await return_interaction.response.defer()
+            # Re-create this view
+            new_view = DescribeImageSourceView(
+                interaction=return_interaction,
+                user=self.user,
+                on_image_selected=self.on_image_selected,
+                repo=self.repo,
+            )
+            new_view.message = self.message
+            new_view.embed = discord.Embed(
+                title="Describe an Image",
+                description=(
+                    "Select how you want to choose an image to describe.\n\n"
+                    "**Tip:** You can also run `/describe_this` with an image "
+                    "attachment to describe it directly."
+                ),
+            )
+            new_view.embed.set_author(
+                name=f"{self.username} (via Apex Mage)",
+                url="https://github.com/aghs-scepter/apex-mage",
+                icon_url=self.pfp,
+            )
+            has_recent_images = False
+            if self.repo and return_interaction.channel_id is not None:
+                has_recent_images = await self.repo.has_images_in_context(
+                    return_interaction.channel_id, "All Models"
+                )
+            new_view.update_buttons(has_recent_images)
+            if new_view.message:
+                await new_view.message.edit(embed=new_view.embed, view=new_view)
+
+        self.stop()
+
+        carousel = DescribeGoogleResultsCarouselView(
+            interaction=interaction,
+            results=result_dicts,
+            query=query,
+            user=self.user,
+            message=self.message,
+            on_image_selected=self.on_image_selected,
+            on_return=on_return,
+        )
+        await carousel.initialize(interaction)
+
+    @discord.ui.button(label="Recent Images", style=discord.ButtonStyle.primary)
+    async def recent_images_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescribeImageSourceView"],
+    ) -> None:
+        """Select a recent image from a carousel."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can select this option.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        if not self.repo or interaction.channel_id is None:
+            return
+
+        images = await self.repo.get_images(interaction.channel_id, "All Models")
+        self.carousel_files = images
+
+        async def on_image_selected_from_carousel(
+            img_interaction: discord.Interaction,
+            image_data_list: list[dict[str, str]],
+        ) -> None:
+            """Handle image selection from single-image carousel."""
+            if not image_data_list:
+                # Cancelled - embed already updated by the view
+                return
+
+            # Take the first (and should be only) selected image
+            if self.on_image_selected:
+                await self.on_image_selected(img_interaction, image_data_list[0])
+
+        self.stop()
+
+        # Use DescribeSingleImageCarouselView for single-image selection
+        carousel_view = DescribeSingleImageCarouselView(
+            interaction=interaction,
+            files=images,
+            user=self.user,
+            message=self.message,
+            on_select=on_image_selected_from_carousel,
+        )
+        await carousel_view.initialize(interaction)
+
+    @discord.ui.button(label="X", style=discord.ButtonStyle.danger)
+    async def cancel_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescribeImageSourceView"],
+    ) -> None:
+        """Cancel the describe operation."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can select this option.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+        self.hide_buttons()
+        if self.embed:
+            self.embed.title = "Operation Cancelled"
+            self.embed.description = "Image description was cancelled."
+        if self.message:
+            await self.message.edit(embed=self.embed, view=self)
+
+    async def on_timeout(self) -> None:
+        """Update the embed on timeout."""
+        self.hide_buttons()
+        if self.embed:
+            self.embed.title = "Session Expired"
+            self.embed.description = (
+                "This interaction has timed out. Please start again."
+            )
+        if self.message:
+            try:
+                await self.message.edit(embed=self.embed, view=self)
+            except Exception:
+                pass  # Message may have been deleted
+
+
+class DescribeSingleImageCarouselView(discord.ui.View):
+    """A single-select image carousel for the describe_this command.
+
+    Similar to MultiImageCarouselView but only allows selecting one image.
+    """
+
+    def __init__(
+        self,
+        interaction: discord.Interaction,
+        files: list[dict[str, str]],
+        user: dict[str, Any] | None = None,
+        message: discord.Message | None = None,
+        on_select: (
+            Callable[
+                [discord.Interaction, list[dict[str, str]]],
+                Coroutine[Any, Any, None],
+            ]
+            | None
+        ) = None,
+    ) -> None:
+        """Initialize the single-image carousel view.
+
+        Args:
+            interaction: The Discord interaction that triggered this view.
+            files: List of image file dicts with 'filename' and 'image' keys.
+            user: Optional user dict with 'name', 'id', and 'pfp' keys.
+            message: Optional message to edit when updating the view.
+            on_select: Callback when user confirms selection. Receives the
+                interaction and list containing the single selected image dict.
+                Empty list indicates cancellation.
+        """
+        super().__init__(timeout=USER_INTERACTION_TIMEOUT)
+        self.user = user
+        self.username, self.user_id, self.pfp = get_user_info(user)
+        self.embed: discord.Embed | None = None
+        self.files = files
+        self.embed_image: discord.File | None = None
+        self.current_index = 0
+        self.on_select = on_select
+        self.message = message
+        self.healthy = bool(self.files)
+
+    async def initialize(self, interaction: discord.Interaction) -> None:
+        """Initialize the single-image carousel view."""
+        if not self.healthy:
+            self.embed, self.embed_image = await self.create_error_embed(
+                "ERROR: There are no images in context. "
+                "Add or generate an image to use this feature.",
+            )
+            self.hide_buttons()
+            logger.error("carousel_no_files", view="DescribeSingleImageCarouselView")
+        else:
+            self.embed, self.embed_image = await self.create_embed()
+            self.update_buttons()
+            logger.debug("embed_created", view="DescribeSingleImageCarouselView")
+
+        if self.message:
+            if self.embed_image:
+                await self.message.edit(
+                    attachments=[self.embed_image],
+                    embed=self.embed,
+                    view=self,
+                )
+            else:
+                await self.message.edit(
+                    embed=self.embed,
+                    view=self,
+                )
+        logger.debug("view_initialized", view="DescribeSingleImageCarouselView")
+
+    def generate_image_chrono_bar(self) -> str:
+        """Generate a visual position indicator for the carousel."""
+        symbols = []
+        for i in range(len(self.files)):
+            is_current = i == self.current_index
+            symbol = "\u25cb"  # White circle
+            if is_current:
+                symbol = f"**[(**{symbol}**)]**"
+            symbols.append(symbol)
+        return "(Newest) " + " ".join(symbols) + " (Oldest)"
+
+    async def create_error_embed(
+        self, error_message: str
+    ) -> tuple[discord.Embed, None]:
+        """Create an error embed."""
+        embed = discord.Embed(title="Error Message", description=error_message)
+        embed.set_author(
+            name=f"{self.username} (via Apex Mage)",
+            url="https://github.com/aghs-scepter/apex-mage",
+            icon_url=self.pfp,
+        )
+        return embed, None
+
+    async def create_embed(self) -> tuple[discord.Embed, discord.File]:
+        """Create the carousel embed with current image."""
+        embed_image = await create_file_from_image(self.files[self.current_index])
+
+        embed = discord.Embed(
+            title="Select an Image to Describe",
+            description=self.generate_image_chrono_bar(),
+        )
+        embed.set_author(
+            name=f"{self.username} (via Apex Mage)",
+            url="https://github.com/aghs-scepter/apex-mage",
+            icon_url=self.pfp,
+        )
+        embed.set_image(url=f"attachment://{embed_image.filename}")
+
+        return embed, embed_image
+
+    def disable_buttons(self) -> None:
+        """Disable all navigation and selection buttons."""
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+
+    def hide_buttons(self) -> None:
+        """Remove all navigation and selection buttons."""
+        self.clear_items()
+
+    def update_buttons(self) -> None:
+        """Update button states based on current position."""
+        self.previous_button.disabled = self.current_index <= 0
+        self.next_button.disabled = self.current_index >= len(self.files) - 1
+
+    async def on_timeout(self) -> None:
+        """Update the embed on timeout."""
+        self.disable_buttons()
+        self.hide_buttons()
+        if self.embed:
+            self.embed.title = "Session Expired"
+            self.embed.description = (
+                "This interaction has timed out. Please start again."
+            )
+            self.embed.set_image(url=None)
+            self.embed.clear_fields()
+        try:
+            if self.message:
+                await self.message.edit(embed=self.embed, attachments=[], view=self)
+        except Exception:
+            pass  # Message may have been deleted
+
+    async def update_embed(self, interaction: discord.Interaction) -> None:
+        """Update the embed with the current image after navigation."""
+        self.embed_image = await create_file_from_image(self.files[self.current_index])
+
+        if self.embed:
+            self.embed.description = self.generate_image_chrono_bar()
+            self.embed.set_image(url=f"attachment://{self.embed_image.filename}")
+
+        self.update_buttons()
+
+        if self.message:
+            await self.message.edit(
+                attachments=[self.embed_image],
+                embed=self.embed,
+                view=self,
+            )
+
+    @discord.ui.button(label="<", style=discord.ButtonStyle.primary)
+    async def previous_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescribeSingleImageCarouselView"],
+    ) -> None:
+        """Navigate to previous image."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        if self.current_index > 0:
+            self.current_index -= 1
+            await self.update_embed(interaction)
+
+    @discord.ui.button(label=">", style=discord.ButtonStyle.primary)
+    async def next_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescribeSingleImageCarouselView"],
+    ) -> None:
+        """Navigate to next image."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        if self.current_index < len(self.files) - 1:
+            self.current_index += 1
+            await self.update_embed(interaction)
+
+    @discord.ui.button(label="Select This Image", style=discord.ButtonStyle.success)
+    async def select_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescribeSingleImageCarouselView"],
+    ) -> None:
+        """Select the current image and continue."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+        if self.on_select:
+            await interaction.response.defer()
+            self.stop()
+            selected = [self.files[self.current_index]]
+            self.hide_buttons()
+            await self.on_select(interaction, selected)
+
+    @discord.ui.button(label="X", style=discord.ButtonStyle.danger)
+    async def cancel_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescribeSingleImageCarouselView"],
+    ) -> None:
+        """Cancel image selection."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+        if self.on_select:
+            await interaction.response.defer()
+            self.hide_buttons()
+            if self.embed:
+                self.embed.title = "Selection Cancelled"
+                self.embed.description = "Image selection was cancelled."
+                self.embed.set_image(url=None)
+                self.embed.clear_fields()
+            if self.message:
+                await self.message.edit(embed=self.embed, attachments=[], view=self)
+            await self.on_select(interaction, [])  # Empty list = cancelled
+
+
+class DescribeGoogleResultsCarouselView(discord.ui.View):
+    """Carousel view for Google Image search results for the describe command.
+
+    Displays one image at a time from search results with navigation.
+    Allows selecting an image for description.
+    """
+
+    def __init__(
+        self,
+        interaction: discord.Interaction,
+        results: list[dict[str, str]],
+        query: str,
+        user: dict[str, Any] | None = None,
+        message: discord.Message | None = None,
+        on_image_selected: (
+            Callable[
+                [discord.Interaction, dict[str, str]],
+                Coroutine[Any, Any, None],
+            ]
+            | None
+        ) = None,
+        on_return: (
+            Callable[
+                [discord.Interaction, "DescribeGoogleResultsCarouselView"],
+                Coroutine[Any, Any, None],
+            ]
+            | None
+        ) = None,
+    ) -> None:
+        """Initialize the describe Google results carousel view.
+
+        Args:
+            interaction: The Discord interaction that triggered this view.
+            results: List of image result dicts with 'url' and optional 'title' keys.
+            query: The search query that produced these results.
+            user: Optional user dict with 'name', 'id', and 'pfp' keys.
+            message: Optional message to edit when updating the view.
+            on_image_selected: Callback when user selects an image.
+                Receives interaction and image data dict.
+            on_return: Callback when user clicks Return.
+                Receives interaction and this view.
+        """
+        super().__init__(timeout=USER_INTERACTION_TIMEOUT)
+        self.user = user
+        self.username, self.user_id, self.pfp = get_user_info(user)
+        self.embed: discord.Embed | None = None
+        self.results = results
+        self.query = query
+        self.current_index = 0
+        self.message = message
+        self.on_image_selected = on_image_selected
+        self.on_return = on_return
+        self.healthy = bool(self.results)
+
+    def generate_chrono_bar(self) -> str:
+        """Generate a visual position indicator for the carousel."""
+        symbols = []
+        for i in range(len(self.results)):
+            is_current = i == self.current_index
+            symbol = "\u25cb"  # White circle
+            if is_current:
+                symbol = f"**[(**{symbol}**)]**"
+            symbols.append(symbol)
+        return " ".join(symbols)
+
+    async def create_embed(self) -> discord.Embed:
+        """Create the carousel embed with current image."""
+        result = self.results[self.current_index]
+
+        embed = discord.Embed(
+            title=f"Search Results: {self.query}",
+            description=(
+                f"{self.generate_chrono_bar()}\n\n"
+                f"**{result.get('title', 'Untitled')}**"
+            ),
+        )
+        embed.set_author(
+            name=f"{self.username} (via Apex Mage)",
+            url="https://github.com/aghs-scepter/apex-mage",
+            icon_url=self.pfp,
+        )
+        # Use the full URL for display
+        embed.set_image(url=result["url"])
+
+        return embed
+
+    async def initialize(self, interaction: discord.Interaction) -> None:
+        """Initialize the describe Google results carousel view."""
+        if not self.healthy:
+            self.embed = discord.Embed(
+                title="No Results",
+                description="No images found.",
+                color=EMBED_COLOR_ERROR,
+            )
+            self.hide_buttons()
+        else:
+            self.embed = await self.create_embed()
+            self.update_buttons()
+
+        if self.message:
+            await self.message.edit(
+                embed=self.embed,
+                attachments=[],
+                view=self,
+            )
+
+    def disable_buttons(self) -> None:
+        """Disable all buttons."""
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+
+    def hide_buttons(self) -> None:
+        """Remove all buttons."""
+        self.clear_items()
+
+    def update_buttons(self) -> None:
+        """Update button states based on current position."""
+        self.previous_button.disabled = self.current_index <= 0
+        self.next_button.disabled = self.current_index >= len(self.results) - 1
+
+    async def update_embed(self, interaction: discord.Interaction) -> None:
+        """Update the embed with the current image after navigation."""
+        self.embed = await self.create_embed()
+        self.update_buttons()
+
+        if self.message:
+            await self.message.edit(
+                embed=self.embed,
+                attachments=[],
+                view=self,
+            )
+
+    @discord.ui.button(label="<", style=discord.ButtonStyle.primary)
+    async def previous_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescribeGoogleResultsCarouselView"],
+    ) -> None:
+        """Navigate to previous image."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        if self.current_index > 0:
+            self.current_index -= 1
+            await self.update_embed(interaction)
+
+    @discord.ui.button(label=">", style=discord.ButtonStyle.primary)
+    async def next_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescribeGoogleResultsCarouselView"],
+    ) -> None:
+        """Navigate to next image."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        if self.current_index < len(self.results) - 1:
+            self.current_index += 1
+            await self.update_embed(interaction)
+
+    @discord.ui.button(label="Select This Image", style=discord.ButtonStyle.success)
+    async def select_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescribeGoogleResultsCarouselView"],
+    ) -> None:
+        """Select the current image for description."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        # Download the image and convert to base64
+        result = self.results[self.current_index]
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(result["url"], timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status != 200:
+                        raise ValueError(f"Failed to download image: HTTP {response.status}")
+                    image_bytes = await response.read()
+                    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+            # Compress the image
+            image_b64 = await asyncio.to_thread(compress_image, image_b64)
+
+            # Create image data dict
+            image_data = {
+                "filename": f"google_search_{self.current_index}.jpeg",
+                "image": image_b64,
+            }
+
+            self.stop()
+            self.hide_buttons()
+
+            if self.on_image_selected:
+                await self.on_image_selected(interaction, image_data)
+
+        except Exception as e:
+            logger.error(
+                "image_download_failed",
+                view="DescribeGoogleResultsCarouselView",
+                url=result["url"],
+                error=str(e),
+            )
+            if self.embed:
+                self.embed.title = "Download Error"
+                self.embed.description = (
+                    "Failed to download this image. Please try another one."
+                )
+                self.embed.color = EMBED_COLOR_ERROR
+            if self.message:
+                await self.message.edit(embed=self.embed, view=self)
+
+    @discord.ui.button(label="Return", style=discord.ButtonStyle.secondary)
+    async def return_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescribeGoogleResultsCarouselView"],
+    ) -> None:
+        """Return to the image source selection."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        self.stop()
+        if self.on_return:
+            await self.on_return(interaction, self)
+
+    @discord.ui.button(label="X", style=discord.ButtonStyle.danger)
+    async def cancel_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescribeGoogleResultsCarouselView"],
+    ) -> None:
+        """Cancel the operation."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+        self.hide_buttons()
+        if self.embed:
+            self.embed.title = "Operation Cancelled"
+            self.embed.description = "Image description was cancelled."
+            self.embed.set_image(url=None)
+        if self.message:
+            await self.message.edit(embed=self.embed, view=self)
+
+    async def on_timeout(self) -> None:
+        """Update the embed on timeout."""
+        self.hide_buttons()
+        if self.embed:
+            self.embed.title = "Session Expired"
+            self.embed.description = (
+                "This interaction has timed out. Please start again."
+            )
+            self.embed.set_image(url=None)
+        if self.message:
+            try:
+                await self.message.edit(embed=self.embed, view=self)
+            except Exception:
+                pass  # Message may have been deleted

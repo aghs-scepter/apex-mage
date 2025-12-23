@@ -2,6 +2,9 @@
 
 from src.clients.discord.views.carousel import (
     ClearHistoryConfirmationView,
+    DescribeGoogleResultsCarouselView,
+    DescribeImageSourceView,
+    DescribeSingleImageCarouselView,
     ImageCarouselView,
     ImageEditPerformView,
     ImageEditPromptModal,
@@ -15,6 +18,9 @@ from src.clients.discord.views.carousel import (
 
 __all__ = [
     "ClearHistoryConfirmationView",
+    "DescribeGoogleResultsCarouselView",
+    "DescribeImageSourceView",
+    "DescribeSingleImageCarouselView",
     "ImageCarouselView",
     "ImageEditPerformView",
     "ImageEditPromptModal",

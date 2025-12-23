@@ -12,6 +12,7 @@ from discord import app_commands
 from src.clients.discord.decorators import count_command
 from src.clients.discord.utils import create_embed_user, handle_text_overflow
 from src.clients.discord.views.carousel import (
+    DescribeImageSourceView,
     ImageEditPerformView,
     ImageEditTypeView,
     ImageGenerationResultView,
@@ -486,5 +487,97 @@ def register_image_commands(bot: "DiscordBot") -> None:
             rate_limiter=bot.rate_limiter,
             image_provider=bot.image_provider,
             gcs_adapter=bot.gcs_adapter,
+        )
+        await selection_view.initialize(interaction)
+
+    @bot.tree.command()  # type: ignore[arg-type]
+    @app_commands.describe(
+        image="Optional: Image file to describe directly (skip selection)"
+    )
+    @count_command
+    async def describe_this(
+        interaction: discord.Interaction,
+        image: discord.Attachment | None = None,
+    ) -> None:
+        """Generate a description of an image for use in image generation prompts.
+
+        If an image is attached, it will be described directly. Otherwise,
+        a selection view will be shown to choose from recent images or
+        Google Image search.
+
+        Args:
+            interaction: The Discord interaction.
+            image: Optional image attachment to describe directly.
+        """
+        assert interaction.channel_id is not None, "Command must be used in a channel"
+        await interaction.response.defer()
+
+        embed_user = create_embed_user(interaction)
+
+        async def on_image_selected(
+            img_interaction: discord.Interaction,
+            image_data: dict[str, str],
+        ) -> None:
+            """Handle image selection - show placeholder for B3.
+
+            This callback is invoked when an image is selected from any source.
+            In the full implementation (B3), this will trigger description
+            generation. For now, shows a placeholder message.
+            """
+            # B3 placeholder: Show success message with image thumbnail
+            placeholder_message = (
+                "Image selected successfully!\n\n"
+                "**Description generation coming in B3.**\n\n"
+                "The selected image will be analyzed using Haiku vision "
+                "to generate a style-first description optimized for "
+                "image generation prompts."
+            )
+            placeholder_view = InfoEmbedView(
+                message=img_interaction.message,
+                user=embed_user,
+                title="Image Selected",
+                description=placeholder_message,
+                is_error=False,
+                image_data=image_data,
+            )
+            await placeholder_view.initialize(img_interaction)
+
+        # If an image was attached directly, process it
+        if image is not None:
+            file_extension = image.filename.split(".")[-1].lower()
+            if file_extension in ["png", "jpg", "jpeg"]:
+                file_data = await image.read()
+                image_b64 = base64.b64encode(file_data).decode("utf-8")
+                image_b64 = await asyncio.to_thread(compress_image, image_b64)
+
+                filename_without_ext = image.filename.rsplit(".", 1)[0]
+                new_filename = f"{filename_without_ext}.jpeg"
+
+                image_data = {"filename": new_filename, "image": image_b64}
+
+                # Call the callback with the uploaded image
+                await on_image_selected(interaction, image_data)
+            else:
+                error_message = (
+                    "The uploaded file is not a valid image format. "
+                    "Please upload a `.png`, `.jpg`, or `.jpeg` file."
+                )
+                error_view = InfoEmbedView(
+                    message=interaction.message,
+                    user=embed_user,
+                    title="Upload error!",
+                    description=error_message,
+                    is_error=True,
+                    image_data=None,
+                )
+                await error_view.initialize(interaction)
+            return
+
+        # No image attached - show the image source selection view
+        selection_view = DescribeImageSourceView(
+            interaction=interaction,
+            user=embed_user,
+            on_image_selected=on_image_selected,
+            repo=bot.repo,
         )
         await selection_view.initialize(interaction)
