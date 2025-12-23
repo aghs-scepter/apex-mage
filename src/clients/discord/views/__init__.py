@@ -8,6 +8,7 @@ from src.clients.discord.views.carousel import (
     ImageEditTypeView,
     ImageSelectionTypeView,
     InfoEmbedView,
+    SummarizePreviewView,
     create_file_from_image,
     get_user_info,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "ImageEditTypeView",
     "ImageSelectionTypeView",
     "InfoEmbedView",
+    "SummarizePreviewView",
     "create_file_from_image",
     "get_user_info",
 ]

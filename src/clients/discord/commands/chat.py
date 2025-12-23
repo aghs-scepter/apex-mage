@@ -17,6 +17,7 @@ from src.clients.discord.views.carousel import (
     ClearHistoryConfirmationView,
     InfoEmbedView,
     PresetSelectView,
+    SummarizePreviewView,
 )
 from src.core.auto_summarization import (
     SUMMARIZATION_CONFIRMATION,
@@ -25,9 +26,10 @@ from src.core.auto_summarization import (
     get_auto_summarization_manager,
     perform_summarization,
 )
+from src.core.haiku import SummarizationError, haiku_summarize_conversation
 from src.core.image_utils import compress_image
 from src.core.providers import ChatMessage
-from src.core.token_counting import check_token_threshold
+from src.core.token_counting import check_token_threshold, count_tokens
 
 if TYPE_CHECKING:
     from src.clients.discord.bot import DiscordBot
@@ -1310,3 +1312,163 @@ def register_chat_commands(bot: "DiscordBot") -> None:
             is_error=False,
         )
         await info_view.initialize(interaction)
+
+    @bot.tree.command(
+        description="Summarize the current conversation context to reduce token usage."
+    )
+    @app_commands.describe(
+        guidance="Optional focus for the summary (e.g., 'the authentication bug')"
+    )
+    @count_command
+    async def summarize(
+        interaction: discord.Interaction,
+        guidance: str | None = None,
+    ) -> None:
+        """Summarize the conversation context with a preview and confirmation.
+
+        Args:
+            interaction: The Discord interaction.
+            guidance: Optional focus area for the summary.
+        """
+        assert interaction.channel_id is not None, "Command must be used in a channel"
+        channel_id = interaction.channel_id
+        await interaction.response.defer()
+
+        embed_user = create_embed_user(interaction)
+
+        try:
+            # Get current context
+            await bot.repo.create_channel(channel_id)
+            context = await bot.repo.get_visible_messages(channel_id, "All Models")
+
+            # Filter to get only prompt and assistant messages for summarization
+            messages_to_summarize = []
+            for msg in context:
+                msg_type = msg.get("message_type", "")
+                msg_data = msg.get("message_data", "")
+                if msg_type in ("prompt", "assistant") and msg_data:
+                    role = "user" if msg_type == "prompt" else "assistant"
+                    messages_to_summarize.append({"role": role, "content": msg_data})
+
+            # Check if there's anything to summarize
+            if len(messages_to_summarize) < 2:
+                info_view = InfoEmbedView(
+                    message=interaction.message,
+                    user=embed_user,
+                    title="Nothing to Summarize",
+                    description=(
+                        "There's not enough conversation history to summarize.\n\n"
+                        "Have a conversation with the bot first, then use /summarize."
+                    ),
+                    is_error=False,
+                )
+                await info_view.initialize(interaction)
+                return
+
+            # Count original tokens
+            original_text = "\n".join(
+                f"{m['role']}: {m['content']}" for m in messages_to_summarize
+            )
+            original_tokens = count_tokens(original_text)
+
+            # Show processing message
+            processing_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Generating Summary",
+                description="Summarizing your conversation... (This may take a few seconds)",
+                is_error=False,
+            )
+            await processing_view.initialize(interaction)
+
+            # Generate summary using Haiku
+            summary_text = await haiku_summarize_conversation(
+                messages_to_summarize, guidance=guidance
+            )
+
+            # Count summary tokens
+            summary_tokens = count_tokens(summary_text)
+
+            # Define callbacks for the preview view
+            async def on_confirm(confirm_interaction: discord.Interaction) -> None:
+                """Apply the summarization."""
+                try:
+                    # Clear existing messages and add summary as new context
+                    await bot.repo.clear_messages(channel_id, "All Models")
+
+                    # Add the summary as a new message pair
+                    await bot.repo.add_message(
+                        channel_id,
+                        "Anthropic",
+                        "prompt",
+                        False,
+                        "[Previous conversation summarized]",
+                    )
+                    await bot.repo.add_message(
+                        channel_id,
+                        "Anthropic",
+                        "assistant",
+                        False,
+                        summary_text,
+                    )
+
+                    # Show confirmation
+                    success_view = InfoEmbedView(
+                        message=confirm_interaction.message,
+                        user=embed_user,
+                        title="Context Summarized",
+                        description="Context has been summarized.",
+                        is_error=False,
+                        notes=[
+                            {
+                                "name": "Token Reduction",
+                                "value": f"~{original_tokens} -> ~{summary_tokens} tokens",
+                            }
+                        ],
+                    )
+                    await success_view.initialize(confirm_interaction)
+
+                except Exception:
+                    error_view = InfoEmbedView(
+                        message=confirm_interaction.message,
+                        user=embed_user,
+                        title="Summarization Error",
+                        description="Failed to apply summarization. Please try again.",
+                        is_error=True,
+                    )
+                    await error_view.initialize(confirm_interaction)
+
+            async def on_cancel(cancel_interaction: discord.Interaction) -> None:
+                """Cancel summarization - no action needed, view handles UI."""
+                pass
+
+            # Show preview with confirm/cancel buttons
+            preview_view = SummarizePreviewView(
+                user=embed_user,
+                summary_text=summary_text,
+                original_tokens=original_tokens,
+                summary_tokens=summary_tokens,
+                on_confirm=on_confirm,
+                on_cancel=on_cancel,
+            )
+            await preview_view.initialize(interaction)
+
+        except SummarizationError as e:
+            error_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Summarization Error",
+                description=str(e),
+                is_error=True,
+            )
+            await error_view.initialize(interaction)
+
+        except Exception:
+            error_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Summarization Error",
+                description="An unexpected error occurred while summarizing. Please try again.",
+                is_error=True,
+            )
+            await error_view.initialize(interaction)
