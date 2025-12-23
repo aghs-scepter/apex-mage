@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from anthropic import APIStatusError, AsyncAnthropic
+from anthropic.types import MessageParam
 
 from src.core.logging import get_logger
 
@@ -193,7 +194,7 @@ async def _call_haiku_api(
                 model=HAIKU_MODEL,
                 max_tokens=max_tokens,
                 system=system_prompt,
-                messages=messages,
+                messages=cast(list[MessageParam], messages),
             )
 
             # Extract text content from response

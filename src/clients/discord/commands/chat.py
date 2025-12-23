@@ -1313,7 +1313,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
         )
         await info_view.initialize(interaction)
 
-    @bot.tree.command(
+    @bot.tree.command(  # type: ignore[arg-type]
         description="Summarize the current conversation context to reduce token usage."
     )
     @app_commands.describe(
