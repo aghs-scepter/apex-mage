@@ -1725,6 +1725,8 @@ class ImageEditPerformView(discord.ui.View):
                 prompt=prompt,
                 download_url=image_return.get("cloud_url"),
                 repo=self.repo,
+                image_provider=self.image_provider,
+                rate_limiter=self.rate_limiter,
             )
             await result_view.initialize(self.interaction)
 
@@ -1770,6 +1772,8 @@ class ImageEditResultView(discord.ui.View):
         prompt: str,
         download_url: str | None = None,
         repo: "RepositoryAdapter | None" = None,
+        image_provider: "ImageProvider | None" = None,
+        rate_limiter: "SlidingWindowRateLimiter | None" = None,
     ) -> None:
         """Initialize the image edit result view.
 
@@ -1782,6 +1786,8 @@ class ImageEditResultView(discord.ui.View):
             prompt: The prompt used for the edit.
             download_url: Optional cloud URL for download button.
             repo: Repository adapter for storing images to context.
+            image_provider: Image provider for generating variations.
+            rate_limiter: Rate limiter for image generation.
         """
         super().__init__(timeout=RESULT_VIEW_TIMEOUT)
         self.interaction = interaction
@@ -1792,6 +1798,8 @@ class ImageEditResultView(discord.ui.View):
         self.prompt = prompt
         self.download_url = download_url
         self.repo = repo
+        self.image_provider = image_provider
+        self.rate_limiter = rate_limiter
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.embed: discord.Embed | None = None
         self.added_to_context = False
@@ -1952,7 +1960,7 @@ class ImageEditResultView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button["ImageEditResultView"],
     ) -> None:
-        """Create variations of the modified image (stub for future implementation)."""
+        """Create variations of the modified image."""
         if self.user_id != interaction.user.id:
             await interaction.response.send_message(
                 f"Only the original requester ({self.username}) can use this.",
@@ -1960,11 +1968,53 @@ class ImageEditResultView(discord.ui.View):
             )
             return
 
-        # Stub implementation - will be connected in D6 (ImageEditResultView)
-        await interaction.response.send_message(
-            "Create Variations feature coming soon!",
-            ephemeral=True,
+        # Check if we have the required dependencies for variations
+        if self.image_provider is None or self.rate_limiter is None:
+            await interaction.response.send_message(
+                "Variation generation is not available. Missing required dependencies.",
+                ephemeral=True,
+            )
+            return
+
+        # Disable button to prevent re-entry
+        button.disabled = True
+        button.label = "Creating Variations..."
+        await interaction.response.defer()
+
+        # Update message to show button is disabled
+        await self.message.edit(view=self)
+
+        # Stop this view's timeout before transitioning
+        self.stop()
+
+        # Create source image for carousel comparison
+        # For modify_image, the source is the original image(s) before editing
+        num_sources = len(self.source_image_data_list)
+        if num_sources > 1:
+            # Create composite for multiple source images
+            source_strings = [img["image"] for img in self.source_image_data_list]
+            composite_b64 = await asyncio.to_thread(
+                create_composite_thumbnail, source_strings
+            )
+            source_for_carousel = {"filename": "source_composite.jpeg", "image": composite_b64}
+        else:
+            source_for_carousel = self.source_image_data_list[0]
+
+        # Transition to VariationCarouselView
+        # Variations are of the EDIT RESULT (result_image_data), not the source
+        # Source image is passed for reference comparison
+        carousel = VariationCarouselView(
+            interaction=interaction,
+            message=self.message,
+            user=self.user,
+            original_image=self.result_image_data,
+            prompt=self.prompt,
+            source_image=source_for_carousel,  # Source for comparison
+            repo=self.repo,
+            image_provider=self.image_provider,
+            rate_limiter=self.rate_limiter,
         )
+        await carousel.initialize(interaction)
 
 
 
