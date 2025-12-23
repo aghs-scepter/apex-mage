@@ -10,7 +10,12 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 import discord
 
-from src.core.haiku import HaikuError, haiku_complete
+from src.core.haiku import (
+    HaikuError,
+    ImageDescriptionError,
+    haiku_complete,
+    haiku_describe_image,
+)
 from src.core.image_utils import (
     compress_image,
     create_composite_thumbnail,
@@ -4284,6 +4289,365 @@ class DescribeGoogleResultsCarouselView(discord.ui.View):
                 "This interaction has timed out. Please start again."
             )
             self.embed.set_image(url=None)
+        if self.message:
+            try:
+                await self.message.edit(embed=self.embed, view=self)
+            except Exception:
+                pass  # Message may have been deleted
+
+
+class DescriptionEditModal(discord.ui.Modal, title="Edit Description"):
+    """Modal for editing the generated image description.
+
+    Allows users to modify the AI-generated description before using it
+    for image generation. Limited to 1000 characters.
+    """
+
+    def __init__(
+        self,
+        current_description: str,
+        on_submit: Callable[[discord.Interaction, str], Coroutine[Any, Any, None]],
+    ) -> None:
+        """Initialize the description edit modal.
+
+        Args:
+            current_description: The current description text to edit.
+            on_submit: Callback when the modal is submitted with the new description.
+        """
+        super().__init__()
+        self.on_submit_callback = on_submit
+
+        self.description: discord.ui.TextInput[DescriptionEditModal] = discord.ui.TextInput(
+            label="Edit the description:",
+            style=discord.TextStyle.paragraph,
+            max_length=1000,
+            required=True,
+            default=current_description,
+            placeholder="Enter a style-first description of the image...",
+        )
+        self.add_item(self.description)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        """Handle modal submission."""
+        await self.on_submit_callback(interaction, self.description.value)
+
+    async def on_error(  # type: ignore[override]
+        self, interaction: discord.Interaction, error: Exception
+    ) -> None:
+        """Handle errors during modal submission."""
+        logger.error("modal_error", view="DescriptionEditModal", error=str(error))
+
+        try:
+            await interaction.response.send_message(
+                "An error occurred while processing your edit. Please try again.",
+                ephemeral=True,
+            )
+        except discord.errors.InteractionResponded:
+            await interaction.followup.send(
+                "An error occurred while processing your edit. Please try again.",
+                ephemeral=True,
+            )
+
+
+class DescriptionDisplayView(discord.ui.View):
+    """View for displaying an image description with edit and accept options.
+
+    Shows the Haiku-generated description in an embed with the analyzed image
+    as a thumbnail. Provides buttons to edit the description or accept it as-is.
+
+    After accepting the description (with or without edits), routing buttons
+    for B4/B5 will be shown (stubbed for now).
+    """
+
+    def __init__(
+        self,
+        interaction: discord.Interaction,
+        image_data: dict[str, str],
+        user: dict[str, Any] | None = None,
+        message: discord.Message | None = None,
+    ) -> None:
+        """Initialize the description display view.
+
+        Args:
+            interaction: The Discord interaction that triggered this view.
+            image_data: Dict with 'filename' and 'image' (base64) keys.
+            user: Optional user dict with 'name', 'id', and 'pfp' keys.
+            message: Optional existing message to update.
+        """
+        super().__init__(timeout=USER_INTERACTION_TIMEOUT)
+        self.user = user
+        self.username, self.user_id, self.pfp = get_user_info(user)
+        self.image_data = image_data
+        self.message = message
+        self.description: str = ""
+        self.embed: discord.Embed | None = None
+        self._generating = False
+
+    async def initialize(self, interaction: discord.Interaction) -> None:
+        """Generate description and display the view.
+
+        Calls haiku_describe_image() to generate a description, then displays
+        the result in an embed with edit/accept buttons.
+
+        Args:
+            interaction: The Discord interaction.
+        """
+        self._generating = True
+
+        # Create loading embed
+        self.embed = discord.Embed(
+            title="Generating Description...",
+            description="Analyzing image with Haiku vision...",
+            color=EMBED_COLOR_INFO,
+        )
+        self.embed.set_author(
+            name=f"{self.username} (via Apex Mage)",
+            url="https://github.com/aghs-scepter/apex-mage",
+            icon_url=self.pfp,
+        )
+
+        # Show thumbnail of the image being analyzed
+        embed_image = await create_file_from_image(self.image_data)
+        self.embed.set_thumbnail(url=f"attachment://{embed_image.filename}")
+
+        # Disable buttons during generation
+        self.edit_button.disabled = True
+        self.use_this_button.disabled = True
+
+        # Display loading state
+        if self.message is not None:
+            await self.message.edit(
+                embed=self.embed,
+                attachments=[embed_image],
+                view=self,
+            )
+        elif interaction.response.is_done():
+            self.message = await interaction.edit_original_response(
+                embed=self.embed,
+                attachments=[embed_image],
+                view=self,
+            )
+        else:
+            self.message = await interaction.followup.send(
+                embed=self.embed,
+                file=embed_image,
+                view=self,
+                wait=True,
+            )
+
+        # Generate description using Haiku vision
+        try:
+            # Determine media type from filename
+            filename = self.image_data.get("filename", "image.jpeg").lower()
+            if filename.endswith(".png"):
+                media_type = "image/png"
+            elif filename.endswith(".gif"):
+                media_type = "image/gif"
+            elif filename.endswith(".webp"):
+                media_type = "image/webp"
+            else:
+                media_type = "image/jpeg"
+
+            self.description = await haiku_describe_image(
+                image_base64=self.image_data["image"],
+                media_type=media_type,
+            )
+
+            logger.info(
+                "description_generated",
+                view="DescriptionDisplayView",
+                description_length=len(self.description),
+            )
+
+        except ImageDescriptionError as e:
+            logger.error(
+                "description_generation_failed",
+                view="DescriptionDisplayView",
+                error=str(e),
+            )
+            # Show error in embed
+            self.embed.title = "Description Generation Failed"
+            self.embed.description = str(e)
+            self.embed.color = EMBED_COLOR_ERROR
+            self.hide_buttons()
+
+            if self.message:
+                # Re-create the file since it was consumed
+                embed_image = await create_file_from_image(self.image_data)
+                await self.message.edit(
+                    embed=self.embed,
+                    attachments=[embed_image],
+                    view=self,
+                )
+            self._generating = False
+            return
+
+        self._generating = False
+
+        # Update embed with description
+        self.embed.title = "Image Description"
+        self.embed.description = self.description
+        self.embed.color = EMBED_COLOR_INFO
+
+        # Enable buttons
+        self.edit_button.disabled = False
+        self.use_this_button.disabled = False
+
+        # Update the message
+        if self.message:
+            embed_image = await create_file_from_image(self.image_data)
+            await self.message.edit(
+                embed=self.embed,
+                attachments=[embed_image],
+                view=self,
+            )
+
+    def hide_buttons(self) -> None:
+        """Remove all buttons from the view."""
+        self.clear_items()
+
+    async def _update_description(
+        self, interaction: discord.Interaction, new_description: str
+    ) -> None:
+        """Update the displayed description after editing.
+
+        Args:
+            interaction: The Discord interaction from the modal.
+            new_description: The new description text.
+        """
+        self.description = new_description
+
+        if self.embed:
+            self.embed.description = self.description
+
+        # Respond to the modal interaction and update the message
+        await interaction.response.defer()
+        if self.message:
+            embed_image = await create_file_from_image(self.image_data)
+            await self.message.edit(
+                embed=self.embed,
+                attachments=[embed_image],
+                view=self,
+            )
+
+    async def _show_routing_placeholder(
+        self, interaction: discord.Interaction
+    ) -> None:
+        """Show routing buttons placeholder (B4/B5 stub).
+
+        In the full implementation, this will show buttons to route to
+        create_image (B4) or modify_image (B5). For now, shows a placeholder.
+
+        Args:
+            interaction: The Discord interaction.
+        """
+        self.hide_buttons()
+
+        if self.embed:
+            self.embed.title = "Description Ready"
+            self.embed.description = (
+                f"**Your description:**\n{self.description}\n\n"
+                "**Routing options coming in B4/B5:**\n"
+                "- [Create Similar Image] - Use description as prompt\n"
+                "- [Use as Edit Prompt] - Modify the original image\n"
+                "- [Copy Text] - Copy description to clipboard\n"
+                "- [Cancel] - Dismiss"
+            )
+
+        if self.message:
+            embed_image = await create_file_from_image(self.image_data)
+            await self.message.edit(
+                embed=self.embed,
+                attachments=[embed_image],
+                view=self,
+            )
+
+    @discord.ui.button(label="Edit Description", style=discord.ButtonStyle.secondary)
+    async def edit_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescriptionDisplayView"],
+    ) -> None:
+        """Open modal to edit the description."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can edit this.",
+                ephemeral=True,
+            )
+            return
+
+        if self._generating:
+            await interaction.response.send_message(
+                "Please wait for the description to finish generating.",
+                ephemeral=True,
+            )
+            return
+
+        modal = DescriptionEditModal(
+            current_description=self.description,
+            on_submit=self._update_description,
+        )
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="Use This", style=discord.ButtonStyle.success)
+    async def use_this_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescriptionDisplayView"],
+    ) -> None:
+        """Accept the description and show routing options."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        if self._generating:
+            await interaction.response.send_message(
+                "Please wait for the description to finish generating.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+        await self._show_routing_placeholder(interaction)
+        self.stop()
+
+    @discord.ui.button(label="X", style=discord.ButtonStyle.danger)
+    async def cancel_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescriptionDisplayView"],
+    ) -> None:
+        """Cancel the description flow."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can cancel this.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+        self.hide_buttons()
+
+        if self.embed:
+            self.embed.title = "Operation Cancelled"
+            self.embed.description = "Image description was cancelled."
+            self.embed.set_thumbnail(url=None)
+
+        if self.message:
+            await self.message.edit(embed=self.embed, attachments=[], view=self)
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        """Update the embed on timeout."""
+        self.hide_buttons()
+        if self.embed:
+            self.embed.title = "Session Expired"
+            self.embed.description = (
+                "This interaction has timed out. Please start again."
+            )
         if self.message:
             try:
                 await self.message.edit(embed=self.embed, view=self)

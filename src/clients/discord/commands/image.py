@@ -13,6 +13,7 @@ from src.clients.discord.decorators import count_command
 from src.clients.discord.utils import create_embed_user, handle_text_overflow
 from src.clients.discord.views.carousel import (
     DescribeImageSourceView,
+    DescriptionDisplayView,
     ImageEditPerformView,
     ImageEditTypeView,
     ImageGenerationResultView,
@@ -518,29 +519,19 @@ def register_image_commands(bot: "DiscordBot") -> None:
             img_interaction: discord.Interaction,
             image_data: dict[str, str],
         ) -> None:
-            """Handle image selection - show placeholder for B3.
+            """Handle image selection - generate and display description.
 
             This callback is invoked when an image is selected from any source.
-            In the full implementation (B3), this will trigger description
-            generation. For now, shows a placeholder message.
+            It displays the DescriptionDisplayView which generates a description
+            using Haiku vision and provides edit/accept options.
             """
-            # B3 placeholder: Show success message with image thumbnail
-            placeholder_message = (
-                "Image selected successfully!\n\n"
-                "**Description generation coming in B3.**\n\n"
-                "The selected image will be analyzed using Haiku vision "
-                "to generate a style-first description optimized for "
-                "image generation prompts."
-            )
-            placeholder_view = InfoEmbedView(
-                message=img_interaction.message,
-                user=embed_user,
-                title="Image Selected",
-                description=placeholder_message,
-                is_error=False,
+            description_view = DescriptionDisplayView(
+                interaction=img_interaction,
                 image_data=image_data,
+                user=embed_user,
+                message=img_interaction.message,
             )
-            await placeholder_view.initialize(img_interaction)
+            await description_view.initialize(img_interaction)
 
         # If an image was attached directly, process it
         if image is not None:
