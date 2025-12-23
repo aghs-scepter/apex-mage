@@ -4350,6 +4350,284 @@ class DescriptionEditModal(discord.ui.Modal, title="Edit Description"):
             )
 
 
+class EditPromptModal(discord.ui.Modal, title="Edit Prompt"):
+    """Modal for editing the description before using it as an edit prompt.
+
+    Allows users to modify the description before it's used to modify
+    the original image. Limited to 1000 characters.
+    """
+
+    def __init__(
+        self,
+        current_prompt: str,
+        on_submit: Callable[[discord.Interaction, str], Coroutine[Any, Any, None]],
+    ) -> None:
+        """Initialize the edit prompt modal.
+
+        Args:
+            current_prompt: The current prompt text (from description).
+            on_submit: Callback when the modal is submitted with the edited prompt.
+        """
+        super().__init__()
+        self.on_submit_callback = on_submit
+
+        self.prompt: discord.ui.TextInput[EditPromptModal] = discord.ui.TextInput(
+            label="Edit the prompt:",
+            style=discord.TextStyle.paragraph,
+            max_length=1000,
+            required=True,
+            default=current_prompt,
+            placeholder="Describe how to modify the image...",
+        )
+        self.add_item(self.prompt)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        """Handle modal submission."""
+        await self.on_submit_callback(interaction, self.prompt.value)
+
+    async def on_error(  # type: ignore[override]
+        self, interaction: discord.Interaction, error: Exception
+    ) -> None:
+        """Handle errors during modal submission."""
+        logger.error("modal_error", view="EditPromptModal", error=str(error))
+
+        try:
+            await interaction.response.send_message(
+                "An error occurred while processing your edit. Please try again.",
+                ephemeral=True,
+            )
+        except discord.errors.InteractionResponded:
+            await interaction.followup.send(
+                "An error occurred while processing your edit. Please try again.",
+                ephemeral=True,
+            )
+
+
+class EditPromptConfirmView(discord.ui.View):
+    """View for confirming or editing a prompt before using it for image modification.
+
+    Shows the description as a prompt with options to edit it first or proceed directly.
+    After confirmation, transitions to ImageEditPerformView to perform the actual edit.
+    """
+
+    def __init__(
+        self,
+        interaction: discord.Interaction,
+        prompt: str,
+        source_image_data: dict[str, str],
+        user: dict[str, Any] | None = None,
+        message: discord.Message | None = None,
+        image_provider: "ImageProvider | None" = None,
+        rate_limiter: "SlidingWindowRateLimiter | None" = None,
+        gcs_adapter: "GCSAdapter | None" = None,
+        repo: "RepositoryAdapter | None" = None,
+    ) -> None:
+        """Initialize the edit prompt confirm view.
+
+        Args:
+            interaction: The Discord interaction.
+            prompt: The description to use as edit prompt.
+            source_image_data: The source image to modify.
+            user: Optional user dict with 'name', 'id', and 'pfp' keys.
+            message: Optional existing message to update.
+            image_provider: Image provider for calling the modification API.
+            rate_limiter: Rate limiter for image modification.
+            gcs_adapter: GCS adapter for uploading images.
+            repo: Repository adapter for storing images to context.
+        """
+        super().__init__(timeout=USER_INTERACTION_TIMEOUT)
+        self.interaction = interaction
+        self.prompt = prompt
+        self.source_image_data = source_image_data
+        self.user = user
+        self.username, self.user_id, self.pfp = get_user_info(user)
+        self.message = message
+        self.image_provider = image_provider
+        self.rate_limiter = rate_limiter
+        self.gcs_adapter = gcs_adapter
+        self.repo = repo
+        self.embed: discord.Embed | None = None
+
+    async def initialize(self, interaction: discord.Interaction) -> None:
+        """Display the confirm view with edit prompt option.
+
+        Args:
+            interaction: The Discord interaction.
+        """
+        # Truncate prompt for display if too long
+        display_prompt = self.prompt
+        if len(display_prompt) > 500:
+            display_prompt = display_prompt[:497] + "..."
+
+        self.embed = discord.Embed(
+            title="Edit Prompt Confirmation",
+            description=(
+                f"**Prompt:**\n{display_prompt}\n\n"
+                "Would you like to edit this prompt before modifying the image?"
+            ),
+            color=EMBED_COLOR_INFO,
+        )
+        self.embed.set_author(
+            name=f"{self.username} (via Apex Mage)",
+            url="https://github.com/aghs-scepter/apex-mage",
+            icon_url=self.pfp,
+        )
+
+        # Show the source image as thumbnail
+        embed_image = await create_file_from_image(self.source_image_data)
+        self.embed.set_thumbnail(url=f"attachment://{embed_image.filename}")
+
+        if self.message is not None:
+            await self.message.edit(
+                embed=self.embed,
+                attachments=[embed_image],
+                view=self,
+            )
+        elif interaction.response.is_done():
+            self.message = await interaction.edit_original_response(
+                embed=self.embed,
+                attachments=[embed_image],
+                view=self,
+            )
+        else:
+            self.message = await interaction.followup.send(
+                embed=self.embed,
+                file=embed_image,
+                view=self,
+                wait=True,
+            )
+
+    async def _proceed_with_edit(
+        self, interaction: discord.Interaction, prompt: str
+    ) -> None:
+        """Proceed to perform the image edit.
+
+        Args:
+            interaction: The Discord interaction.
+            prompt: The prompt to use for the edit.
+        """
+        if self.message is None:
+            logger.error("message_not_set", view="EditPromptConfirmView")
+            return
+
+        # Transition to ImageEditPerformView
+        perform_view = ImageEditPerformView(
+            interaction=interaction,
+            message=self.message,
+            user=self.user,
+            image_data=self.source_image_data,
+            edit_type="description_edit",
+            prompt=prompt,
+            on_complete=None,  # ImageEditResultView handles result display
+            rate_limiter=self.rate_limiter,
+            image_provider=self.image_provider,
+            image_data_list=[self.source_image_data],
+            gcs_adapter=self.gcs_adapter,
+            repo=self.repo,
+        )
+        self.stop()
+        await perform_view.initialize(interaction)
+
+    async def _handle_edit_modal_submit(
+        self, interaction: discord.Interaction, edited_prompt: str
+    ) -> None:
+        """Handle submission from the edit prompt modal.
+
+        Args:
+            interaction: The Discord interaction.
+            edited_prompt: The edited prompt text.
+        """
+        await interaction.response.defer()
+        self.prompt = edited_prompt
+        await self._proceed_with_edit(interaction, edited_prompt)
+
+    @discord.ui.button(
+        label="Edit Prompt",
+        style=discord.ButtonStyle.secondary,
+        row=0,
+    )
+    async def edit_prompt_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["EditPromptConfirmView"],
+    ) -> None:
+        """Open modal to edit the prompt before proceeding."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        modal = EditPromptModal(
+            current_prompt=self.prompt,
+            on_submit=self._handle_edit_modal_submit,
+        )
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(
+        label="Use As-Is",
+        style=discord.ButtonStyle.primary,
+        row=0,
+    )
+    async def use_as_is_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["EditPromptConfirmView"],
+    ) -> None:
+        """Proceed with the current prompt without editing."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+        await self._proceed_with_edit(interaction, self.prompt)
+
+    @discord.ui.button(
+        label="X",
+        style=discord.ButtonStyle.danger,
+        row=0,
+    )
+    async def cancel_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["EditPromptConfirmView"],
+    ) -> None:
+        """Cancel and return to the routing view."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can cancel this.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        if self.embed:
+            self.embed.title = "Operation Cancelled"
+            self.embed.description = "Edit prompt was cancelled."
+            self.embed.set_thumbnail(url=None)
+
+        if self.message:
+            await self.message.edit(embed=self.embed, attachments=[], view=None)
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        """Update the embed on timeout."""
+        if self.embed:
+            self.embed.title = "Session Expired"
+            self.embed.description = (
+                "This interaction has timed out. Please start again."
+            )
+            self.embed.set_thumbnail(url=None)
+        if self.message:
+            try:
+                await self.message.edit(embed=self.embed, attachments=[], view=None)
+            except Exception:
+                pass  # Message may have been deleted
 
 
 class DescriptionRoutingView(discord.ui.View):
@@ -4357,7 +4635,7 @@ class DescriptionRoutingView(discord.ui.View):
 
     After the user accepts a description, this view shows buttons to:
     - Create Similar Image: Generate a new image using the description as prompt
-    - Use as Edit Prompt: (B5) Modify the original image using the description
+    - Use as Edit Prompt: Modify the original image using the description
     - Copy Text: Copy the description to clipboard (uses Discord's copy feature)
     - Cancel: Dismiss the flow
     """
@@ -4658,14 +4936,13 @@ class DescriptionRoutingView(discord.ui.View):
         label="Use as Edit Prompt",
         style=discord.ButtonStyle.secondary,
         row=0,
-        disabled=True,  # B5 will implement this
     )
     async def use_as_edit_button(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button["DescriptionRoutingView"],
     ) -> None:
-        """Use the description to modify the original image (B5 stub)."""
+        """Use the description to modify the original image."""
         if self.user_id != interaction.user.id:
             await interaction.response.send_message(
                 f"Only the original requester ({self.username}) can use this.",
@@ -4673,11 +4950,29 @@ class DescriptionRoutingView(discord.ui.View):
             )
             return
 
-        # B5 will implement this functionality
-        await interaction.response.send_message(
-            "This feature is coming soon in a future update.",
-            ephemeral=True,
+        if self._generating:
+            await interaction.response.send_message(
+                "Please wait for the current operation to complete.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        # Show EditPromptConfirmView to confirm/edit the prompt before modifying
+        confirm_view = EditPromptConfirmView(
+            interaction=interaction,
+            prompt=self.description,
+            source_image_data=self.reference_image_data,
+            user=self.user,
+            message=self.message,
+            image_provider=self.image_provider,
+            rate_limiter=self.rate_limiter,
+            gcs_adapter=self.gcs_adapter,
+            repo=self.repo,
         )
+        self.stop()
+        await confirm_view.initialize(interaction)
 
     @discord.ui.button(
         label="Copy Text",
