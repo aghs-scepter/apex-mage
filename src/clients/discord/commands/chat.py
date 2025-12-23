@@ -18,8 +18,16 @@ from src.clients.discord.views.carousel import (
     InfoEmbedView,
     PresetSelectView,
 )
+from src.core.auto_summarization import (
+    SUMMARIZATION_CONFIRMATION,
+    THRESHOLD_WARNING,
+    convert_context_to_chat_messages,
+    get_auto_summarization_manager,
+    perform_summarization,
+)
 from src.core.image_utils import compress_image
 from src.core.providers import ChatMessage
+from src.core.token_counting import check_token_threshold
 
 if TYPE_CHECKING:
     from src.clients.discord.bot import DiscordBot
@@ -948,12 +956,102 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                         bot, "prompt", prompt, channel_id
                     )
 
+                    # Get auto-summarization manager
+                    summarization_manager = get_auto_summarization_manager()
+                    summarization_performed = False
+                    response_prefix = ""
+
+                    # Check if auto-summarization is pending for this channel
+                    if summarization_manager.should_summarize(channel_id):
+                        # Perform auto-summarization before processing
+                        try:
+                            # Convert context to format for summarization
+                            messages_for_summary = convert_context_to_chat_messages(
+                                context
+                            )
+
+                            if messages_for_summary:
+                                # Perform summarization
+                                summary = await perform_summarization(
+                                    messages_for_summary
+                                )
+
+                                # Clear existing messages and replace with summary
+                                await bot.repo.clear_messages(channel_id, "All Models")
+                                await bot.repo.create_channel(channel_id)
+
+                                # Add the summary as an assistant message
+                                await bot.repo.add_message(
+                                    channel_id,
+                                    "Anthropic",
+                                    "assistant",
+                                    False,
+                                    summary,
+                                )
+
+                                # Re-add the current user prompt
+                                if images:
+                                    await bot.repo.add_message_with_images(
+                                        channel_id,
+                                        "Anthropic",
+                                        "prompt",
+                                        False,
+                                        prompt,
+                                        str_images,
+                                    )
+                                else:
+                                    await bot.repo.add_message(
+                                        channel_id,
+                                        "Anthropic",
+                                        "prompt",
+                                        False,
+                                        prompt,
+                                    )
+
+                                # Refresh context with summarized version
+                                context = await bot.repo.get_visible_messages(
+                                    channel_id, "All Models"
+                                )
+
+                                summarization_performed = True
+                                response_prefix = SUMMARIZATION_CONFIRMATION + "\n\n"
+
+                            # Clear the pending flag
+                            summarization_manager.clear_pending(channel_id)
+
+                        except Exception:
+                            # If summarization fails, continue without it
+                            # Clear the flag to avoid repeated failures
+                            summarization_manager.clear_pending(channel_id)
+
                     # Convert context to ChatMessages and extract system prompt
                     chat_messages, system_prompt = _convert_context_to_messages(context)
                     chat_response = await bot.ai_provider.chat(
                         chat_messages, system_prompt=system_prompt
                     )
                     response = chat_response.content
+
+                    # Check token threshold after processing to set pending for next msg
+                    # Only check if we didn't just perform summarization
+                    if not summarization_performed:
+                        _, threshold_exceeded = check_token_threshold(
+                            system_prompt=system_prompt or "",
+                            messages=[
+                                {"role": m.role, "content": m.content}
+                                for m in chat_messages
+                            ],
+                            current_prompt=prompt,
+                        )
+
+                        if threshold_exceeded:
+                            # Set pending for next message and add warning to response
+                            summarization_manager.set_pending(channel_id)
+                            response = response + "\n\n" + THRESHOLD_WARNING
+
+                    # Add confirmation prefix if summarization was performed
+                    if response_prefix:
+                        response = response_prefix + response
+
                     await bot.repo.add_message(
                         channel_id, "Anthropic", "assistant", False, response
                     )
@@ -1075,6 +1173,9 @@ def register_chat_commands(bot: "DiscordBot") -> None:
         ) -> None:
             if confirmed:
                 await bot.repo.clear_messages(channel_id, "All Models")
+                # Clear any pending auto-summarization state
+                summarization_manager = get_auto_summarization_manager()
+                summarization_manager.clear_pending(channel_id)
                 success_message = (
                     "The bot's memory for this channel has been cleared. "
                     "All prior messages and images have been forgotten."
