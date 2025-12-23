@@ -22,6 +22,12 @@ from src.core.image_utils import (
     create_composite_thumbnail,
     image_strip_headers,
 )
+from src.core.image_variations import (
+    RateLimitExceededError,
+    VariationError,
+    generate_variation_remixed,
+    generate_variation_same_prompt,
+)
 from src.core.logging import get_logger
 from src.core.prompts.refinement import IMAGE_MODIFICATION_REFINEMENT_PROMPT
 from src.core.providers import ImageModifyRequest, ImageRequest
@@ -5392,6 +5398,8 @@ class VariationCarouselView(discord.ui.View):
         prompt: str,
         source_image: dict[str, str] | None = None,
         repo: "RepositoryAdapter | None" = None,
+        image_provider: "ImageProvider | None" = None,
+        rate_limiter: "SlidingWindowRateLimiter | None" = None,
     ) -> None:
         """Initialize the variation carousel view.
 
@@ -5403,6 +5411,8 @@ class VariationCarouselView(discord.ui.View):
             prompt: The prompt used for image generation.
             source_image: Optional source image for modify_image comparison.
             repo: Repository adapter for storing images to context.
+            image_provider: Image provider for generating variations.
+            rate_limiter: Rate limiter for image generation.
         """
         super().__init__(timeout=RESULT_VIEW_TIMEOUT)
         self.interaction = interaction
@@ -5412,9 +5422,12 @@ class VariationCarouselView(discord.ui.View):
         self.prompt = prompt
         self.source_image = source_image
         self.repo = repo
+        self.image_provider = image_provider
+        self.rate_limiter = rate_limiter
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.embed: discord.Embed | None = None
         self.added_to_context = False
+        self._generating = False  # Prevent concurrent generation
 
         # Carousel state
         self.variations: list[dict[str, str]] = []
@@ -5628,7 +5641,7 @@ class VariationCarouselView(discord.ui.View):
     ) -> None:
         """Generate a variation using the same prompt.
 
-        Stub implementation - actual generation will be implemented in D4.
+        Relies on model randomness to produce variations of the original image.
         """
         if self.user_id != interaction.user.id:
             await interaction.response.send_message(
@@ -5644,11 +5657,81 @@ class VariationCarouselView(discord.ui.View):
             )
             return
 
-        # Stub implementation for D4
-        await interaction.response.send_message(
-            "Same Prompt variation generation coming soon! (D4)",
-            ephemeral=True,
-        )
+        if self._generating:
+            await interaction.response.send_message(
+                "Please wait for the current generation to complete.",
+                ephemeral=True,
+            )
+            return
+
+        if not self.image_provider:
+            await interaction.response.send_message(
+                "Image generation is not available.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+        self._generating = True
+
+        # Show generating status
+        if self.embed:
+            self.embed.description = f"{self._generate_position_indicator()}\nGenerating variation..."
+
+        # Disable buttons during generation
+        self._disable_all_buttons()
+        await self.message.edit(embed=self.embed, view=self)
+
+        try:
+            variation_image = await generate_variation_same_prompt(
+                original_prompt=self.prompt,
+                image_provider=self.image_provider,
+                user_id=self.user_id,
+                rate_limiter=self.rate_limiter,
+            )
+
+            # Add the variation and navigate to it
+            self.variations.append(variation_image)
+            self.current_index = len(self._get_all_images()) - 1
+
+            logger.info(
+                "same_prompt_variation_added",
+                view="VariationCarouselView",
+                variation_count=len(self.variations),
+            )
+
+            # Update the embed with the new variation
+            await self._update_embed()
+
+        except RateLimitExceededError as e:
+            retry_msg = ""
+            if e.retry_after:
+                minutes = int(e.retry_after // 60)
+                retry_msg = f" Try again in {minutes} minute(s)."
+            if self.embed:
+                self.embed.description = (
+                    f"{self._generate_position_indicator()}\n"
+                    f"Rate limit exceeded.{retry_msg}"
+                )
+            self._update_buttons()
+            await self.message.edit(embed=self.embed, view=self)
+
+        except VariationError as e:
+            logger.error(
+                "same_prompt_variation_failed",
+                view="VariationCarouselView",
+                error=str(e),
+            )
+            if self.embed:
+                self.embed.description = (
+                    f"{self._generate_position_indicator()}\n"
+                    f"Failed to generate variation: {e}"
+                )
+            self._update_buttons()
+            await self.message.edit(embed=self.embed, view=self)
+
+        finally:
+            self._generating = False
 
     @discord.ui.button(label="AI Remix", style=discord.ButtonStyle.secondary, row=1)
     async def ai_remix_button(
@@ -5658,7 +5741,8 @@ class VariationCarouselView(discord.ui.View):
     ) -> None:
         """Generate a variation with AI-remixed prompt.
 
-        Stub implementation - actual generation will be implemented in D4.
+        Uses Haiku to slightly modify the prompt while preserving style,
+        then generates a new image.
         """
         if self.user_id != interaction.user.id:
             await interaction.response.send_message(
@@ -5674,11 +5758,98 @@ class VariationCarouselView(discord.ui.View):
             )
             return
 
-        # Stub implementation for D4
-        await interaction.response.send_message(
-            "AI Remix variation generation coming soon! (D4)",
-            ephemeral=True,
-        )
+        if self._generating:
+            await interaction.response.send_message(
+                "Please wait for the current generation to complete.",
+                ephemeral=True,
+            )
+            return
+
+        if not self.image_provider:
+            await interaction.response.send_message(
+                "Image generation is not available.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+        self._generating = True
+
+        # Show generating status
+        if self.embed:
+            self.embed.description = (
+                f"{self._generate_position_indicator()}\n"
+                "Remixing prompt and generating variation..."
+            )
+
+        # Disable buttons during generation
+        self._disable_all_buttons()
+        await self.message.edit(embed=self.embed, view=self)
+
+        try:
+            remixed_prompt, variation_image = await generate_variation_remixed(
+                original_prompt=self.prompt,
+                image_provider=self.image_provider,
+                user_id=self.user_id,
+                rate_limiter=self.rate_limiter,
+            )
+
+            # Add the variation and navigate to it
+            self.variations.append(variation_image)
+            self.current_index = len(self._get_all_images()) - 1
+
+            logger.info(
+                "remixed_variation_added",
+                view="VariationCarouselView",
+                variation_count=len(self.variations),
+                remixed_prompt_preview=remixed_prompt[:100] if remixed_prompt else "",
+            )
+
+            # Update the embed with the new variation
+            # Also update the prompt field to show the remixed prompt
+            if self.embed and self.embed.fields:
+                # Update the prompt field to show remixed prompt
+                display_prompt = remixed_prompt
+                if len(display_prompt) > 1024:
+                    display_prompt = display_prompt[:1021] + "..."
+                self.embed.set_field_at(
+                    0,
+                    name="Prompt (AI Remixed)",
+                    value=display_prompt,
+                    inline=False,
+                )
+
+            await self._update_embed()
+
+        except RateLimitExceededError as e:
+            retry_msg = ""
+            if e.retry_after:
+                minutes = int(e.retry_after // 60)
+                retry_msg = f" Try again in {minutes} minute(s)."
+            if self.embed:
+                self.embed.description = (
+                    f"{self._generate_position_indicator()}\n"
+                    f"Rate limit exceeded.{retry_msg}"
+                )
+            self._update_buttons()
+            await self.message.edit(embed=self.embed, view=self)
+
+        except VariationError as e:
+            logger.error(
+                "remixed_variation_failed",
+                view="VariationCarouselView",
+                error=str(e),
+            )
+            if self.embed:
+                self.embed.description = (
+                    f"{self._generate_position_indicator()}\n"
+                    f"Failed to generate remixed variation: {e}"
+                )
+            self._update_buttons()
+            await self.message.edit(embed=self.embed, view=self)
+
+        finally:
+            self._generating = False
 
     # Row 2: Action buttons
     @discord.ui.button(label="Add to Context", style=discord.ButtonStyle.success, row=2)
