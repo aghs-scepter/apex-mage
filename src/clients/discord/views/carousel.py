@@ -1989,6 +1989,8 @@ class ImageGenerationResultView(discord.ui.View):
         download_url: str | None = None,
         repo: "RepositoryAdapter | None" = None,
         full_prompt_url: str | None = None,
+        image_provider: "ImageProvider | None" = None,
+        rate_limiter: "SlidingWindowRateLimiter | None" = None,
     ) -> None:
         """Initialize the image generation result view.
 
@@ -2001,6 +2003,8 @@ class ImageGenerationResultView(discord.ui.View):
             download_url: Optional cloud URL for download button.
             repo: Repository adapter for storing images to context.
             full_prompt_url: Optional URL for viewing the full prompt.
+            image_provider: Image provider for generating variations.
+            rate_limiter: Rate limiter for image generation.
         """
         super().__init__(timeout=RESULT_VIEW_TIMEOUT)
         self.interaction = interaction
@@ -2011,6 +2015,8 @@ class ImageGenerationResultView(discord.ui.View):
         self.download_url = download_url
         self.repo = repo
         self.full_prompt_url = full_prompt_url
+        self.image_provider = image_provider
+        self.rate_limiter = rate_limiter
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.embed: discord.Embed | None = None
         self.added_to_context = False
@@ -2178,7 +2184,7 @@ class ImageGenerationResultView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button["ImageGenerationResultView"],
     ) -> None:
-        """Create variations of the generated image (stub for D5 implementation)."""
+        """Create variations of the generated image."""
         if self.user_id != interaction.user.id:
             await interaction.response.send_message(
                 f"Only the original requester ({self.username}) can use this.",
@@ -2186,11 +2192,49 @@ class ImageGenerationResultView(discord.ui.View):
             )
             return
 
-        # Stub implementation - will be connected in D5
-        await interaction.response.send_message(
-            "Create Variations feature coming soon!",
-            ephemeral=True,
+        # Check if we have the required dependencies for variations
+        if self.image_provider is None or self.rate_limiter is None:
+            await interaction.response.send_message(
+                "Variation generation is not available. Missing required dependencies.",
+                ephemeral=True,
+            )
+            return
+
+        # Disable button to prevent re-entry
+        button.disabled = True
+        button.label = "Creating Variations..."
+        await interaction.response.defer()
+
+        # Check that we have a message to update
+        if self.message is None:
+            logger.error(
+                "create_variations_no_message",
+                view="ImageGenerationResultView",
+            )
+            return
+
+        # Update message to show button is disabled
+        await self.message.edit(view=self)
+
+        # Stop this view's timeout before transitioning
+        self.stop()
+
+        # Transition to VariationCarouselView
+        # Note: source_image is None for create_image (no source to compare)
+        carousel = VariationCarouselView(
+            interaction=interaction,
+            message=self.message,
+            user=self.user,
+            original_image=self.image_data,
+            prompt=self.prompt,
+            source_image=None,  # No source for create_image
+            repo=self.repo,
+            image_provider=self.image_provider,
+            rate_limiter=self.rate_limiter,
         )
+        await carousel.initialize(interaction)
+
+
 class MultiImageCarouselView(discord.ui.View):
     """A view that provides a multi-image selection carousel.
 

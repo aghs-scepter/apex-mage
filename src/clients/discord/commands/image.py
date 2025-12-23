@@ -243,6 +243,8 @@ def register_image_commands(bot: "DiscordBot") -> None:
                             download_url=download_url,
                             repo=bot.repo,
                             full_prompt_url=full_prompt_url,
+                            image_provider=bot.image_provider,
+                            rate_limiter=bot.rate_limiter,
                         )
                         await result_view.initialize(gen_interaction)
                     else:
