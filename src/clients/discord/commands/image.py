@@ -14,6 +14,7 @@ from src.clients.discord.utils import create_embed_user, handle_text_overflow
 from src.clients.discord.views.carousel import (
     ImageEditPerformView,
     ImageEditTypeView,
+    ImageGenerationResultView,
     ImageSelectionTypeView,
     InfoEmbedView,
     MultiImageCarouselView,
@@ -189,27 +190,20 @@ def register_image_commands(bot: "DiscordBot") -> None:
                         generated_image = generated_images[0]
                         if generated_image.url is None:
                             raise ValueError("Generated image has no URL")
-                        image_data = image_strip_headers(generated_image.url, "jpeg")
-                        image_data = await asyncio.to_thread(
-                            compress_image, image_data
+                        image_b64 = image_strip_headers(generated_image.url, "jpeg")
+                        image_b64 = await asyncio.to_thread(
+                            compress_image, image_b64
                         )
-                        str_image = json.dumps(
-                            [{"filename": "image.jpeg", "image": image_data}]
-                        )
-                        await bot.repo.add_message_with_images(
-                            channel_id,
-                            "Fal.AI",
-                            "prompt",
-                            False,
-                            "Image",
-                            str_image,
-                        )
+
+                        # Note: We no longer auto-add to context here.
+                        # The ImageGenerationResultView will handle explicit
+                        # context addition when user clicks "Add to Context".
 
                         await bot.rate_limiter.record(interaction.user.id, "image")
 
                         has_nsfw = generated_image.has_nsfw_content or False
                         output_filename, _ = format_image_response(
-                            image_data, "jpeg", has_nsfw
+                            image_b64, "jpeg", has_nsfw
                         )
 
                         # Upload image to GCS for download button
@@ -218,7 +212,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
                             download_url = await asyncio.to_thread(
                                 bot.gcs_adapter.upload_generated_image,
                                 channel_id,
-                                image_data,
+                                image_b64,
                             )
                             logger.info(
                                 "image_uploaded_to_gcs",
@@ -233,27 +227,22 @@ def register_image_commands(bot: "DiscordBot") -> None:
                             )
                             # Continue without download URL - image still shows
 
-                        output_message = (
-                            "Your image was created successfully. "
-                            "You can use it for future `/prompt` and "
-                            "`/modify_image` commands."
-                        )
-                        output_notes = [{"name": "Prompt", "value": display_prompt}]
-                        output_view = InfoEmbedView(
+                        # Show ImageGenerationResultView with explicit context
+                        # addition buttons instead of auto-adding to context
+                        result_view = ImageGenerationResultView(
+                            interaction=gen_interaction,
                             message=gen_interaction.message,
                             user=embed_user,
-                            title="Image generation successful",
-                            description=output_message,
-                            is_error=False,
-                            notes=output_notes,
-                            full_prompt_url=full_prompt_url,
                             image_data={
                                 "filename": output_filename,
-                                "image": image_data,
+                                "image": image_b64,
                             },
+                            prompt=final_prompt,
                             download_url=download_url,
+                            repo=bot.repo,
+                            full_prompt_url=full_prompt_url,
                         )
-                        await output_view.initialize(gen_interaction)
+                        await result_view.initialize(gen_interaction)
                     else:
                         wait_msg = (
                             f" Try again in {int(rate_check.wait_seconds)} seconds."
