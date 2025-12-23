@@ -32,6 +32,8 @@ EMBED_COLOR_INFO = 0x3498DB
 # Timeout constants (seconds)
 # User interaction timeout (how long user has to click/submit)
 USER_INTERACTION_TIMEOUT = 300.0  # 5 minutes
+# Extended timeout for result views where user may take time to decide
+RESULT_VIEW_TIMEOUT = 600.0  # 10 minutes
 # API timeout for image generation calls
 API_TIMEOUT_SECONDS = 180
 
@@ -622,78 +624,25 @@ class ImageSelectionTypeView(discord.ui.View):
     async def _on_edit_complete(
         self, interaction: discord.Interaction, result_data: dict[str, Any]
     ) -> None:
-        """Handle completed image edit from GoogleResultsCarouselView.
+        """Handle image edit errors from GoogleResultsCarouselView.
 
-        Stores the edited image result in the channel's context and displays the result.
+        Note: Success cases are now handled by ImageEditResultView directly.
+        This callback is only invoked for error cases (rate limit, timeout, etc.).
 
         Args:
             interaction: The Discord interaction.
-            result_data: The edited image data to store.
+            result_data: Error data containing 'error' and 'message' keys.
         """
-        # Handle error case
-        if result_data.get("error"):
-            error_msg = result_data.get("message")
-            error_view = InfoEmbedView(
-                message=interaction.message,
-                user=self.user,
-                title="Image edit error!",
-                description=str(error_msg) if error_msg else "An error occurred during image editing.",
-                is_error=True,
-                image_data=None,
-            )
-            await error_view.initialize(interaction)
-            return
-
-        # Store the result in context
-        if self.repo and interaction.channel_id is not None:
-            try:
-                await self.repo.create_channel(interaction.channel_id)
-                images = [result_data]
-                str_images = json.dumps(images)
-                await self.repo.add_message_with_images(
-                    interaction.channel_id,
-                    "Fal.AI",
-                    "prompt",
-                    False,
-                    "Modified Image",
-                    str_images,
-                )
-                logger.info(
-                    "edit_complete_stored",
-                    view="ImageSelectionTypeView",
-                    channel_id=interaction.channel_id,
-                )
-            except Exception as e:
-                logger.error(
-                    "edit_complete_store_failed",
-                    view="ImageSelectionTypeView",
-                    error=str(e),
-                )
-
-        # Display the result
-        success_message = (
-            "Your image was modified successfully. "
-            "You can use it for future `/prompt` and `/modify_image` commands."
-        )
-        image_data_typed: dict[str, str] = {
-            "filename": str(result_data.get("filename", "")),
-            "image": str(result_data.get("image", "")),
-        }
-        prompt = result_data.get("prompt", "")
-        output_notes = [{"name": "Prompt", "value": prompt}] if prompt else None
-        download_url = result_data.get("cloud_url")
-
-        success_view = InfoEmbedView(
+        error_msg = result_data.get("message")
+        error_view = InfoEmbedView(
             message=interaction.message,
             user=self.user,
-            title="Image modified",
-            description=success_message,
-            is_error=False,
-            image_data=image_data_typed,
-            notes=output_notes,
-            download_url=download_url,
+            title="Image edit error!",
+            description=str(error_msg) if error_msg else "An error occurred during image editing.",
+            is_error=True,
+            image_data=None,
         )
-        await success_view.initialize(interaction)
+        await error_view.initialize(interaction)
 
     @discord.ui.button(label="Recent Images", style=discord.ButtonStyle.primary)
     async def recent_images_button(
@@ -1207,6 +1156,7 @@ class ImageEditPerformView(discord.ui.View):
         image_provider: "ImageProvider | None" = None,
         image_data_list: list[dict[str, str]] | None = None,
         gcs_adapter: "GCSAdapter | None" = None,
+        repo: "RepositoryAdapter | None" = None,
     ) -> None:
         # timeout=None ensures download button remains functional indefinitely
         super().__init__(timeout=None)
@@ -1221,6 +1171,7 @@ class ImageEditPerformView(discord.ui.View):
         self.rate_limiter = rate_limiter
         self.image_provider = image_provider
         self.gcs_adapter = gcs_adapter
+        self.repo = repo
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.embed: discord.Embed | None = None
 
@@ -1368,9 +1319,18 @@ class ImageEditPerformView(discord.ui.View):
                         channel_id=self.interaction.channel_id,
                     )
 
-            # Call completion callback
-            if self.on_complete:
-                await self.on_complete(self.interaction, image_return)
+            # Transition to ImageEditResultView for explicit context addition
+            result_view = ImageEditResultView(
+                interaction=self.interaction,
+                message=self.message,
+                user=self.user,
+                result_image_data=image_return,
+                source_image_data_list=self.image_data_list,
+                prompt=prompt,
+                download_url=image_return.get("cloud_url"),
+                repo=self.repo,
+            )
+            await result_view.initialize(self.interaction)
 
         except TimeoutError:
             # API timeout - distinct from View's on_timeout (user interaction timeout)
@@ -1390,6 +1350,225 @@ class ImageEditPerformView(discord.ui.View):
             }
             if self.on_complete:
                 await self.on_complete(self.interaction, error_data)
+
+
+
+
+class ImageEditResultView(discord.ui.View):
+    """A view that displays the result of an image edit operation.
+
+    Shows the modified image with the source image(s) as a thumbnail for comparison.
+    Provides buttons for adding to context, creating variations, and downloading.
+
+    This view does NOT auto-add the modified image to context - the user must
+    explicitly click Add to Context to store the result.
+    """
+
+    def __init__(
+        self,
+        interaction: discord.Interaction,
+        message: discord.Message,
+        user: dict[str, Any] | None,
+        result_image_data: dict[str, str],
+        source_image_data_list: list[dict[str, str]],
+        prompt: str,
+        download_url: str | None = None,
+        repo: "RepositoryAdapter | None" = None,
+    ) -> None:
+        """Initialize the image edit result view.
+
+        Args:
+            interaction: The Discord interaction.
+            message: The message to update with the result.
+            user: User dict with name, id, and pfp keys.
+            result_image_data: The modified image data with filename and image keys.
+            source_image_data_list: List of source images used for the edit.
+            prompt: The prompt used for the edit.
+            download_url: Optional cloud URL for download button.
+            repo: Repository adapter for storing images to context.
+        """
+        super().__init__(timeout=RESULT_VIEW_TIMEOUT)
+        self.interaction = interaction
+        self.message = message
+        self.user = user
+        self.result_image_data = result_image_data
+        self.source_image_data_list = source_image_data_list
+        self.prompt = prompt
+        self.download_url = download_url
+        self.repo = repo
+        self.username, self.user_id, self.pfp = get_user_info(user)
+        self.embed: discord.Embed | None = None
+        self.added_to_context = False
+
+    async def initialize(self, interaction: discord.Interaction) -> None:
+        """Create and display the result embed with source thumbnail."""
+        desc_line1 = "Your image was modified successfully."
+        desc_line2 = "Click **Add to Context** to use this image in future commands."
+        self.embed = discord.Embed(
+            title="Image Modified",
+            description=desc_line1 + chr(10) + desc_line2,
+            color=EMBED_COLOR_INFO,
+        )
+        self.embed.set_author(
+            name=f"{self.username} (via Apex Mage)",
+            url="https://github.com/aghs-scepter/apex-mage",
+            icon_url=self.pfp,
+        )
+
+        # Add prompt as a field
+        if self.prompt:
+            self.embed.add_field(
+                name="Prompt",
+                value=self.prompt,
+                inline=False,
+            )
+
+        # Create the result image file for the main image
+        result_file = await create_file_from_image(self.result_image_data)
+        self.embed.set_image(url=f"attachment://{result_file.filename}")
+
+        # Create source thumbnail (composite if multiple, single if one)
+        num_sources = len(self.source_image_data_list)
+        if num_sources > 1:
+            # Create composite thumbnail for multiple source images
+            source_strings = [img["image"] for img in self.source_image_data_list]
+            composite_b64 = await asyncio.to_thread(
+                create_composite_thumbnail, source_strings
+            )
+            source_display = {"filename": "source_composite.jpeg", "image": composite_b64}
+        else:
+            source_display = self.source_image_data_list[0]
+
+        # Use a unique filename to avoid conflicts
+        source_file = discord.File(
+            io.BytesIO(base64.b64decode(source_display["image"])),
+            filename="source_thumbnail.jpeg",
+        )
+        self.embed.set_thumbnail(url="attachment://source_thumbnail.jpeg")
+
+        # Add footer indicating source
+        plural_s = "s" if num_sources > 1 else ""
+        source_label = f"Source: {num_sources} image{plural_s}"
+        self.embed.set_footer(text=source_label)
+
+        # Add download button if URL is provided
+        if self.download_url:
+            self.add_item(
+                discord.ui.Button(
+                    label="Download",
+                    url=self.download_url,
+                    style=discord.ButtonStyle.link,
+                    row=1,
+                )
+            )
+
+        await self.message.edit(
+            embed=self.embed,
+            attachments=[result_file, source_file],
+            view=self,
+        )
+
+    async def on_timeout(self) -> None:
+        """Update the embed when the view times out."""
+        if self.embed:
+            if not self.added_to_context:
+                self.embed.description = (
+                    "This interaction has timed out. "
+                    "The image was NOT added to context."
+                )
+            self.embed.color = EMBED_COLOR_ERROR if not self.added_to_context else EMBED_COLOR_INFO
+
+        # Disable all buttons
+        for child in self.children:
+            if isinstance(child, discord.ui.Button) and not child.url:
+                child.disabled = True
+
+        try:
+            await self.message.edit(embed=self.embed, view=self)
+        except Exception:
+            pass
+
+    @discord.ui.button(label="Add to Context", style=discord.ButtonStyle.success, row=0)
+    async def add_to_context_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["ImageEditResultView"],
+    ) -> None:
+        """Add the modified image to the channel context."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        # Store the image in context
+        if self.repo and interaction.channel_id is not None:
+            try:
+                await self.repo.create_channel(interaction.channel_id)
+                images = [self.result_image_data]
+                str_images = json.dumps(images)
+                await self.repo.add_message_with_images(
+                    interaction.channel_id,
+                    "Fal.AI",
+                    "prompt",
+                    False,
+                    "Modified Image",
+                    str_images,
+                )
+                self.added_to_context = True
+                logger.info(
+                    "image_edit_result_added_to_context",
+                    view="ImageEditResultView",
+                    channel_id=interaction.channel_id,
+                )
+            except Exception as e:
+                logger.error(
+                    "image_edit_result_add_failed",
+                    view="ImageEditResultView",
+                    error=str(e),
+                )
+                if self.embed:
+                    self.embed.description = f"Failed to add image to context: {e}"
+                    self.embed.color = EMBED_COLOR_ERROR
+                await self.message.edit(embed=self.embed, view=self)
+                return
+
+        # Update button to show success
+        button.label = "Added to Context"
+        button.disabled = True
+        button.style = discord.ButtonStyle.secondary
+
+        # Update embed description
+        if self.embed:
+            self.embed.description = (
+                "Image added to context successfully!" + chr(10) +
+                "You can use it for future /prompt and /modify_image commands."
+            )
+
+        await self.message.edit(embed=self.embed, view=self)
+
+    @discord.ui.button(label="Create Variations", style=discord.ButtonStyle.primary, row=0)
+    async def create_variations_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["ImageEditResultView"],
+    ) -> None:
+        """Create variations of the modified image (stub for future implementation)."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        # Stub implementation - will be connected in D6
+        await interaction.response.send_message(
+            "Create Variations feature coming soon!",
+            ephemeral=True,
+        )
 
 
 class MultiImageCarouselView(discord.ui.View):
@@ -2404,6 +2583,7 @@ class GoogleResultsCarouselView(discord.ui.View):
                 rate_limiter=self.rate_limiter,
                 image_provider=self.image_provider,
                 gcs_adapter=self.gcs_adapter,
+                repo=self.repo,
             )
             await perform_view.initialize(modal_interaction)
 

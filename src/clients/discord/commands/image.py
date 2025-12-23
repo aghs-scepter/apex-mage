@@ -335,54 +335,21 @@ def register_image_commands(bot: "DiscordBot") -> None:
         async def on_edit_complete(
             edit_interaction: discord.Interaction, result_data: dict[str, Any]
         ) -> None:
-            """Handle image edit completion."""
-            if result_data.get("error"):
-                error_msg = result_data.get("message")
-                error_view = InfoEmbedView(
-                    message=edit_interaction.message,
-                    user=embed_user,
-                    title="Image edit error!",
-                    description=str(error_msg) if error_msg else "An error occurred during image editing.",
-                    is_error=True,
-                    image_data=None,
-                )
-                await error_view.initialize(edit_interaction)
-            else:
-                str_image = json.dumps([result_data])
-                await bot.repo.add_message_with_images(
-                    channel_id,
-                    "Fal.AI",
-                    "prompt",
-                    False,
-                    "Modified Image",
-                    str_image,
-                )
+            """Handle image edit errors.
 
-                success_message = (
-                    "Your image was modified successfully. "
-                    "You can use it for future `/prompt` and `/modify_image` commands."
-                )
-                # result_data contains filename, image, and prompt keys when successful
-                image_data_typed: dict[str, str] = {
-                    "filename": str(result_data.get("filename", "")),
-                    "image": str(result_data.get("image", "")),
-                }
-                # Include prompt in success embed notes (like create_image does)
-                prompt = result_data.get("prompt", "")
-                output_notes = [{"name": "Prompt", "value": prompt}] if prompt else None
-                # Get cloud_url for download button (may be None if GCS not configured)
-                download_url = result_data.get("cloud_url")
-                success_view = InfoEmbedView(
-                    message=edit_interaction.message,
-                    user=embed_user,
-                    title="Image modified",
-                    description=success_message,
-                    is_error=False,
-                    image_data=image_data_typed,
-                    notes=output_notes,
-                    download_url=download_url,
-                )
-                await success_view.initialize(edit_interaction)
+            Note: Success cases are now handled by ImageEditResultView directly.
+            This callback is only invoked for error cases (rate limit, timeout, etc.).
+            """
+            error_msg = result_data.get("message")
+            error_view = InfoEmbedView(
+                message=edit_interaction.message,
+                user=embed_user,
+                title="Image edit error!",
+                description=str(error_msg) if error_msg else "An error occurred during image editing.",
+                is_error=True,
+                image_data=None,
+            )
+            await error_view.initialize(edit_interaction)
 
         async def on_edit_type_selected(
             edit_interaction: discord.Interaction, edit_type: str, prompt: str
@@ -412,6 +379,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
                 rate_limiter=bot.rate_limiter,
                 image_provider=bot.image_provider,
                 gcs_adapter=bot.gcs_adapter,
+                repo=bot.repo,
             )
             await perform_view.initialize(edit_interaction)
 
