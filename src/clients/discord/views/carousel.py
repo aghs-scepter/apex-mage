@@ -600,7 +600,10 @@ class ImageSelectionTypeView(discord.ui.View):
             if new_view.message:
                 await new_view.message.edit(embed=new_view.embed, view=new_view)
 
-        # 6. Create and show GoogleResultsCarouselView
+        # 6. Stop this view's timeout before transitioning to GoogleResultsCarouselView
+        self.stop()
+
+        # Create and show GoogleResultsCarouselView
         carousel = GoogleResultsCarouselView(
             interaction=interaction,
             results=result_dicts,
@@ -705,6 +708,7 @@ class ImageSelectionTypeView(discord.ui.View):
             return
 
         if self.on_select:
+            self.stop()  # Stop timeout before transitioning to next view
             self.hide_buttons()
             await self.on_select(interaction, "Recent Images")
 
@@ -933,6 +937,7 @@ class ImageCarouselView(discord.ui.View):
         """Accept current image selection."""
         if self.on_select:
             await interaction.response.defer()
+            self.stop()  # Stop timeout before transitioning to next view
             selected_image = self.get_current_file()
             self.disable_buttons()
             await self.on_select(interaction, selected_image)
@@ -1055,6 +1060,7 @@ class ImageEditTypeView(discord.ui.View):
                 )
                 return
 
+            self.stop()  # Stop timeout - user is committing to edit action
             self.disable_buttons()
             self.hide_buttons()
             if self.message:
@@ -1672,6 +1678,7 @@ class MultiImageCarouselView(discord.ui.View):
             return
         if self.on_select:
             await interaction.response.defer()
+            self.stop()  # Stop timeout before transitioning to next view
             selected = self.get_selected_images()
             self.hide_buttons()
             await self.on_select(interaction, selected)
@@ -2373,6 +2380,9 @@ class GoogleResultsCarouselView(discord.ui.View):
                 return
 
             await modal_interaction.response.defer()
+
+            # Stop this view's timeout - user has committed to the edit action
+            self.stop()
 
             if modal_interaction.message is None:
                 logger.error(
