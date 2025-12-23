@@ -723,6 +723,10 @@ class ImageCarouselView(discord.ui.View):
             Callable[[discord.Interaction, dict[str, str] | None], Coroutine[Any, Any, None]]
             | None
         ) = None,
+        image_provider: "ImageProvider | None" = None,
+        rate_limiter: "SlidingWindowRateLimiter | None" = None,
+        gcs_adapter: "GCSAdapter | None" = None,
+        repo: "RepositoryAdapter | None" = None,
     ) -> None:
         # User has 5 minutes to make a selection
         super().__init__(timeout=USER_INTERACTION_TIMEOUT)
@@ -735,6 +739,10 @@ class ImageCarouselView(discord.ui.View):
         self.on_select = on_select
         self.message = message
         self.healthy = bool(self.files)
+        self.image_provider = image_provider
+        self.rate_limiter = rate_limiter
+        self.gcs_adapter = gcs_adapter
+        self.repo = repo
 
     async def initialize(self, interaction: discord.Interaction) -> None:
         """Initialize the image carousel view."""
@@ -921,7 +929,38 @@ class ImageCarouselView(discord.ui.View):
                 await self.message.edit(embed=self.embed, attachments=[], view=self)
             await self.on_select(interaction, None)
 
+    @discord.ui.button(label="Describe", style=discord.ButtonStyle.secondary)
+    async def describe_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button["ImageCarouselView"]
+    ) -> None:
+        """Generate a description of the current image using Haiku vision."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
 
+        await interaction.response.defer()
+
+        # Stop this view's timeout before transitioning
+        self.stop()
+
+        # Get the current image
+        current_image = self.get_current_file()
+
+        # Transition to DescriptionDisplayView
+        description_view = DescriptionDisplayView(
+            interaction=interaction,
+            image_data=current_image,
+            user=self.user,
+            message=self.message,
+            image_provider=self.image_provider,
+            rate_limiter=self.rate_limiter,
+            gcs_adapter=self.gcs_adapter,
+            repo=self.repo,
+        )
+        await description_view.initialize(interaction)
 
 
 class AIAssistModal(discord.ui.Modal, title="AI Assist - Describe Your Edit"):
@@ -1727,6 +1766,7 @@ class ImageEditPerformView(discord.ui.View):
                 repo=self.repo,
                 image_provider=self.image_provider,
                 rate_limiter=self.rate_limiter,
+                gcs_adapter=self.gcs_adapter,
             )
             await result_view.initialize(self.interaction)
 
@@ -1774,6 +1814,7 @@ class ImageEditResultView(discord.ui.View):
         repo: "RepositoryAdapter | None" = None,
         image_provider: "ImageProvider | None" = None,
         rate_limiter: "SlidingWindowRateLimiter | None" = None,
+        gcs_adapter: "GCSAdapter | None" = None,
     ) -> None:
         """Initialize the image edit result view.
 
@@ -1788,6 +1829,7 @@ class ImageEditResultView(discord.ui.View):
             repo: Repository adapter for storing images to context.
             image_provider: Image provider for generating variations.
             rate_limiter: Rate limiter for image generation.
+            gcs_adapter: GCS adapter for uploading images.
         """
         super().__init__(timeout=RESULT_VIEW_TIMEOUT)
         self.interaction = interaction
@@ -1800,6 +1842,7 @@ class ImageEditResultView(discord.ui.View):
         self.repo = repo
         self.image_provider = image_provider
         self.rate_limiter = rate_limiter
+        self.gcs_adapter = gcs_adapter
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.embed: discord.Embed | None = None
         self.added_to_context = False
@@ -2016,7 +2059,37 @@ class ImageEditResultView(discord.ui.View):
         )
         await carousel.initialize(interaction)
 
+    @discord.ui.button(label="Describe", style=discord.ButtonStyle.secondary, row=0)
+    async def describe_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["ImageEditResultView"],
+    ) -> None:
+        """Generate a description of the image using Haiku vision."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
 
+        await interaction.response.defer()
+
+        # Stop this view's timeout before transitioning
+        self.stop()
+
+        # Transition to DescriptionDisplayView
+        description_view = DescriptionDisplayView(
+            interaction=interaction,
+            image_data=self.result_image_data,
+            user=self.user,
+            message=self.message,
+            image_provider=self.image_provider,
+            rate_limiter=self.rate_limiter,
+            gcs_adapter=self.gcs_adapter,
+            repo=self.repo,
+        )
+        await description_view.initialize(interaction)
 
 
 class ImageGenerationResultView(discord.ui.View):
@@ -2041,6 +2114,7 @@ class ImageGenerationResultView(discord.ui.View):
         full_prompt_url: str | None = None,
         image_provider: "ImageProvider | None" = None,
         rate_limiter: "SlidingWindowRateLimiter | None" = None,
+        gcs_adapter: "GCSAdapter | None" = None,
     ) -> None:
         """Initialize the image generation result view.
 
@@ -2055,6 +2129,7 @@ class ImageGenerationResultView(discord.ui.View):
             full_prompt_url: Optional URL for viewing the full prompt.
             image_provider: Image provider for generating variations.
             rate_limiter: Rate limiter for image generation.
+            gcs_adapter: GCS adapter for uploading images.
         """
         super().__init__(timeout=RESULT_VIEW_TIMEOUT)
         self.interaction = interaction
@@ -2067,6 +2142,7 @@ class ImageGenerationResultView(discord.ui.View):
         self.full_prompt_url = full_prompt_url
         self.image_provider = image_provider
         self.rate_limiter = rate_limiter
+        self.gcs_adapter = gcs_adapter
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.embed: discord.Embed | None = None
         self.added_to_context = False
@@ -2283,6 +2359,38 @@ class ImageGenerationResultView(discord.ui.View):
             rate_limiter=self.rate_limiter,
         )
         await carousel.initialize(interaction)
+
+    @discord.ui.button(label="Describe", style=discord.ButtonStyle.secondary, row=0)
+    async def describe_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["ImageGenerationResultView"],
+    ) -> None:
+        """Generate a description of the image using Haiku vision."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        # Stop this view's timeout before transitioning
+        self.stop()
+
+        # Transition to DescriptionDisplayView
+        description_view = DescriptionDisplayView(
+            interaction=interaction,
+            image_data=self.image_data,
+            user=self.user,
+            message=self.message,
+            image_provider=self.image_provider,
+            rate_limiter=self.rate_limiter,
+            gcs_adapter=self.gcs_adapter,
+            repo=self.repo,
+        )
+        await description_view.initialize(interaction)
 
 
 class MultiImageCarouselView(discord.ui.View):
@@ -3348,6 +3456,77 @@ class GoogleResultsCarouselView(discord.ui.View):
         # Stop this view (clears search state)
         self.stop()
 
+    @discord.ui.button(label="Describe", style=discord.ButtonStyle.secondary, row=1)
+    async def describe_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["GoogleResultsCarouselView"],
+    ) -> None:
+        """Generate a description of the current image using Haiku vision."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        current_result = self.get_current_result()
+        image_url = current_result.get("url", "")
+
+        # Download and prepare image for description
+        try:
+            image_b64 = await self._download_image_as_base64(image_url)
+            image_b64 = await asyncio.to_thread(compress_image, image_b64)
+            filename = self._generate_filename_from_url(image_url)
+        except aiohttp.ClientError as e:
+            logger.error(
+                "describe_image_download_failed",
+                view="GoogleResultsCarouselView",
+                url=image_url,
+                error=str(e),
+            )
+            await interaction.response.send_message(
+                f"Failed to download image for description: {e}",
+                ephemeral=True,
+            )
+            return
+        except Exception as e:
+            logger.error(
+                "describe_image_prepare_failed",
+                view="GoogleResultsCarouselView",
+                url=image_url,
+                error=str(e),
+            )
+            await interaction.response.send_message(
+                "Failed to prepare image for description. Please try again.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        # Stop this view's timeout before transitioning
+        self.stop()
+
+        # Create image data for the description flow
+        image_data: dict[str, str] = {
+            "filename": filename,
+            "image": image_b64,
+        }
+
+        # Transition to DescriptionDisplayView
+        description_view = DescriptionDisplayView(
+            interaction=interaction,
+            image_data=image_data,
+            user=self.user,
+            message=self.message,
+            image_provider=self.image_provider,
+            rate_limiter=self.rate_limiter,
+            gcs_adapter=self.gcs_adapter,
+            repo=self.repo,
+        )
+        await description_view.initialize(interaction)
+
     async def on_timeout(self) -> None:
         """Update the embed on timeout."""
         self.hide_buttons()
@@ -3361,7 +3540,6 @@ class GoogleResultsCarouselView(discord.ui.View):
                 await self.message.edit(embed=self.embed, attachments=[], view=self)
             except Exception:
                 pass  # Message may have been deleted
-
 
 
 class SummarizePreviewView(discord.ui.View):
@@ -4960,6 +5138,9 @@ class DescriptionRoutingView(discord.ui.View):
                 prompt=self.description,
                 download_url=download_url,
                 repo=self.repo,
+                image_provider=self.image_provider,
+                rate_limiter=self.rate_limiter,
+                gcs_adapter=self.gcs_adapter,
             )
             await result_view.initialize(interaction)
             self._generating = False
