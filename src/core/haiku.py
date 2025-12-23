@@ -250,3 +250,189 @@ async def _call_haiku_api(
 
     # This should not be reached, but just in case
     raise HaikuError(f"Max retries exceeded: {last_error}")
+
+
+# System prompt for image description optimized for image generation models
+IMAGE_DESCRIPTION_SYSTEM_PROMPT = """You are an image description expert. Your task is to describe images in a way that is optimized for image generation models (like fal.ai, Stable Diffusion, etc).
+
+Requirements:
+- Start with style descriptions (art style, colors, lighting, mood) at the FRONT of your output
+- Follow with a detailed description of the scene, subjects, and composition
+- Write a single paragraph with no line breaks
+- Be concise but detailed - aim for 2-4 sentences
+- Avoid flowery or poetic language - be direct and descriptive
+- Focus on visual elements that would help an image model recreate the image
+
+Example output format:
+'Digital art style, vibrant colors, soft lighting. A tabby cat sits on a wooden chair in a sunlit room, looking directly at the camera with green eyes.'"""
+
+
+class ImageDescriptionError(HaikuError):
+    """Error raised when image description fails."""
+
+    pass
+
+
+async def haiku_describe_image(
+    image_base64: str,
+    media_type: str = "image/jpeg",
+) -> str:
+    """Generate a style-first description of an image using Claude Haiku.
+
+    This function uses Haiku's vision capabilities to analyze an image and
+    produce a description optimized for image generation models. The output
+    starts with style descriptors (art style, colors, lighting) followed by
+    scene details.
+
+    Args:
+        image_base64: The base64-encoded image data (without data URL prefix).
+        media_type: The MIME type of the image. Defaults to "image/jpeg".
+            Supported: "image/jpeg", "image/png", "image/gif", "image/webp".
+
+    Returns:
+        A style-first description of the image suitable for image generation
+        model prompts.
+
+    Raises:
+        ImageDescriptionError: If the image description fails. This could be
+            due to API errors, invalid image data, or content policy violations.
+
+    Example:
+        >>> description = await haiku_describe_image(image_base64="iVBORw...")
+        >>> print(description)
+        'Digital art style, vibrant colors, soft lighting. A tabby cat...'
+    """
+    try:
+        description = await haiku_vision(
+            system_prompt=IMAGE_DESCRIPTION_SYSTEM_PROMPT,
+            image_base64=image_base64,
+            user_message="Describe this image.",
+            max_tokens=512,
+            media_type=media_type,
+        )
+        return description.strip()
+    except HaikuError as e:
+        error_message = str(e)
+        # Provide more specific error messages based on the error type
+        if "API key" in error_message:
+            raise ImageDescriptionError(
+                "Failed to describe image: API key not configured"
+            ) from e
+        elif "timed out" in error_message.lower():
+            raise ImageDescriptionError(
+                "Failed to describe image: Request timed out"
+            ) from e
+        elif "Empty response" in error_message:
+            raise ImageDescriptionError(
+                "Failed to describe image: No description generated"
+            ) from e
+        else:
+            raise ImageDescriptionError(
+                f"Failed to describe image: {error_message}"
+            ) from e
+
+
+class SummarizationError(HaikuError):
+    """Error raised when conversation summarization fails."""
+
+    pass
+
+
+def _format_conversation_for_summary(messages: list[dict[str, str]]) -> str:
+    """Format a list of messages into a readable conversation transcript.
+
+    Args:
+        messages: List of message dicts with 'role' and 'content' keys.
+
+    Returns:
+        Formatted conversation string.
+    """
+    lines = []
+    for msg in messages:
+        role = msg.get("role", "unknown").capitalize()
+        content = msg.get("content", "")
+        lines.append(f"{role}: {content}")
+    return "\n\n".join(lines)
+
+
+async def haiku_summarize_conversation(
+    messages: list[dict[str, str]],
+    guidance: str | None = None,
+) -> str:
+    """Summarize a conversation to approximately 25% of its original length.
+
+    This function uses Claude Haiku to compress a conversation while
+    preserving the most important information according to a priority order:
+    1. Key facts and explicit decisions
+    2. Current active task/request
+    3. User preferences mentioned
+    4. Technical details relevant to ongoing work
+    5. Recent context over old context
+
+    Args:
+        messages: List of message dicts with 'role' and 'content' keys.
+            Example: [{"role": "user", "content": "Hello"}, ...]
+        guidance: Optional focus area for the summary. If provided, the
+            summary will emphasize information related to this guidance.
+            Example: "the authentication bug" -> emphasizes auth-related context.
+
+    Returns:
+        A structured summary starting with "Summary of conversation:"
+        that preserves essential context for continuing the conversation.
+
+    Raises:
+        SummarizationError: If the summarization fails due to API errors,
+            empty input, or other issues.
+
+    Example:
+        >>> messages = [
+        ...     {"role": "user", "content": "I need help with the auth bug"},
+        ...     {"role": "assistant", "content": "Can you describe the symptoms?"},
+        ...     {"role": "user", "content": "Users get logged out after 5 minutes"},
+        ... ]
+        >>> summary = await haiku_summarize_conversation(messages)
+        >>> print(summary)
+        'Summary of conversation: User is debugging an authentication issue...'
+    """
+    # Import here to avoid circular imports
+    from src.core.prompts.summarization import build_summarization_prompt
+
+    if not messages:
+        raise SummarizationError("Cannot summarize empty conversation")
+
+    # Format conversation for the API
+    conversation_text = _format_conversation_for_summary(messages)
+
+    if not conversation_text.strip():
+        raise SummarizationError("Conversation contains no content")
+
+    # Build the system prompt with optional guidance
+    system_prompt = build_summarization_prompt(guidance)
+
+    try:
+        # Use higher max_tokens to allow for comprehensive summary
+        # Target is ~25% but we give Haiku room to work
+        summary = await haiku_complete(
+            system_prompt=system_prompt,
+            user_message=conversation_text,
+            max_tokens=2048,
+        )
+        return summary.strip()
+    except HaikuError as e:
+        error_message = str(e)
+        if "API key" in error_message:
+            raise SummarizationError(
+                "Failed to summarize: API key not configured"
+            ) from e
+        elif "timed out" in error_message.lower():
+            raise SummarizationError(
+                "Failed to summarize: Request timed out"
+            ) from e
+        elif "Empty response" in error_message:
+            raise SummarizationError(
+                "Failed to summarize: No summary generated"
+            ) from e
+        else:
+            raise SummarizationError(
+                f"Failed to summarize: {error_message}"
+            ) from e

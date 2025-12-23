@@ -482,3 +482,207 @@ class TestRetryLogic:
                         )
 
             assert "timed out" in str(exc_info.value)
+
+
+class TestHaikuDescribeImage:
+    """Tests for haiku_describe_image function."""
+
+    @pytest.mark.asyncio
+    async def test_returns_description(self) -> None:
+        """Test that haiku_describe_image returns a description."""
+        with patch("src.core.haiku.AsyncAnthropic") as mock_client_class:
+            mock_response = MagicMock()
+            mock_response.content = [
+                MagicMock(text="Digital art style, vibrant colors. A cat on a chair.")
+            ]
+
+            mock_client = MagicMock()
+            mock_client.messages.create = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value = mock_client
+
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+                from src.core.haiku import haiku_describe_image
+                result = await haiku_describe_image(image_base64="iVBORw0KGgo==")
+
+            assert result == "Digital art style, vibrant colors. A cat on a chair."
+
+    @pytest.mark.asyncio
+    async def test_strips_whitespace(self) -> None:
+        """Test that haiku_describe_image strips leading/trailing whitespace."""
+        with patch("src.core.haiku.AsyncAnthropic") as mock_client_class:
+            mock_response = MagicMock()
+            mock_response.content = [
+                MagicMock(text="  Description with whitespace  ")
+            ]
+
+            mock_client = MagicMock()
+            mock_client.messages.create = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value = mock_client
+
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+                from src.core.haiku import haiku_describe_image
+                result = await haiku_describe_image(image_base64="iVBORw0KGgo==")
+
+            assert result == "Description with whitespace"
+
+    @pytest.mark.asyncio
+    async def test_uses_image_description_system_prompt(self) -> None:
+        """Test that haiku_describe_image uses the correct system prompt."""
+        with patch("src.core.haiku.AsyncAnthropic") as mock_client_class:
+            mock_response = MagicMock()
+            mock_response.content = [MagicMock(text="response")]
+
+            mock_client = MagicMock()
+            mock_create = AsyncMock(return_value=mock_response)
+            mock_client.messages.create = mock_create
+            mock_client_class.return_value = mock_client
+
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+                from src.core.haiku import (
+                    IMAGE_DESCRIPTION_SYSTEM_PROMPT,
+                    haiku_describe_image,
+                )
+                await haiku_describe_image(image_base64="iVBORw0KGgo==")
+
+            call_kwargs = mock_create.call_args.kwargs
+            assert call_kwargs["system"] == IMAGE_DESCRIPTION_SYSTEM_PROMPT
+
+    @pytest.mark.asyncio
+    async def test_uses_max_tokens_512(self) -> None:
+        """Test that haiku_describe_image uses max_tokens of 512."""
+        with patch("src.core.haiku.AsyncAnthropic") as mock_client_class:
+            mock_response = MagicMock()
+            mock_response.content = [MagicMock(text="response")]
+
+            mock_client = MagicMock()
+            mock_create = AsyncMock(return_value=mock_response)
+            mock_client.messages.create = mock_create
+            mock_client_class.return_value = mock_client
+
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+                from src.core.haiku import haiku_describe_image
+                await haiku_describe_image(image_base64="iVBORw0KGgo==")
+
+            call_kwargs = mock_create.call_args.kwargs
+            assert call_kwargs["max_tokens"] == 512
+
+    @pytest.mark.asyncio
+    async def test_uses_default_jpeg_media_type(self) -> None:
+        """Test that haiku_describe_image uses jpeg as default media type."""
+        with patch("src.core.haiku.AsyncAnthropic") as mock_client_class:
+            mock_response = MagicMock()
+            mock_response.content = [MagicMock(text="response")]
+
+            mock_client = MagicMock()
+            mock_create = AsyncMock(return_value=mock_response)
+            mock_client.messages.create = mock_create
+            mock_client_class.return_value = mock_client
+
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+                from src.core.haiku import haiku_describe_image
+                await haiku_describe_image(image_base64="iVBORw0KGgo==")
+
+            call_kwargs = mock_create.call_args.kwargs
+            messages = call_kwargs["messages"]
+            content = messages[0]["content"]
+            assert content[0]["source"]["media_type"] == "image/jpeg"
+
+    @pytest.mark.asyncio
+    async def test_accepts_png_media_type(self) -> None:
+        """Test that haiku_describe_image accepts PNG media type."""
+        with patch("src.core.haiku.AsyncAnthropic") as mock_client_class:
+            mock_response = MagicMock()
+            mock_response.content = [MagicMock(text="response")]
+
+            mock_client = MagicMock()
+            mock_create = AsyncMock(return_value=mock_response)
+            mock_client.messages.create = mock_create
+            mock_client_class.return_value = mock_client
+
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+                from src.core.haiku import haiku_describe_image
+                await haiku_describe_image(
+                    image_base64="iVBORw0KGgo==", media_type="image/png"
+                )
+
+            call_kwargs = mock_create.call_args.kwargs
+            messages = call_kwargs["messages"]
+            content = messages[0]["content"]
+            assert content[0]["source"]["media_type"] == "image/png"
+
+    @pytest.mark.asyncio
+    async def test_raises_image_description_error_on_api_key_missing(self) -> None:
+        """Test that haiku_describe_image raises ImageDescriptionError on missing API key."""
+        with patch.dict("os.environ", {}, clear=True):
+            import os
+            if "ANTHROPIC_API_KEY" in os.environ:
+                del os.environ["ANTHROPIC_API_KEY"]
+
+            from src.core.haiku import ImageDescriptionError, haiku_describe_image
+            with pytest.raises(ImageDescriptionError) as exc_info:
+                await haiku_describe_image(image_base64="iVBORw0KGgo==")
+
+            assert "ANTHROPIC_API_KEY" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_raises_image_description_error_on_timeout(self) -> None:
+        """Test that haiku_describe_image raises ImageDescriptionError on timeout."""
+        with patch("src.core.haiku.AsyncAnthropic") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.messages.create = AsyncMock(side_effect=TimeoutError("Timeout"))
+            mock_client_class.return_value = mock_client
+
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+                    from src.core.haiku import ImageDescriptionError, haiku_describe_image
+                    with pytest.raises(ImageDescriptionError) as exc_info:
+                        await haiku_describe_image(image_base64="iVBORw0KGgo==")
+
+            assert "Request timed out" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_raises_image_description_error_on_empty_response(self) -> None:
+        """Test that haiku_describe_image raises ImageDescriptionError on empty response."""
+        with patch("src.core.haiku.AsyncAnthropic") as mock_client_class:
+            mock_response = MagicMock()
+            mock_response.content = []
+
+            mock_client = MagicMock()
+            mock_client.messages.create = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value = mock_client
+
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+                from src.core.haiku import ImageDescriptionError, haiku_describe_image
+                with pytest.raises(ImageDescriptionError) as exc_info:
+                    await haiku_describe_image(image_base64="iVBORw0KGgo==")
+
+            assert "No description generated" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_raises_image_description_error_on_api_error(self) -> None:
+        """Test that haiku_describe_image raises ImageDescriptionError on API error."""
+        with patch("src.core.haiku.AsyncAnthropic") as mock_client_class:
+            mock_response_400 = MagicMock()
+            mock_response_400.status_code = 400
+            error_400 = APIStatusError(
+                message="Bad request",
+                response=mock_response_400,
+                body=None,
+            )
+
+            mock_client = MagicMock()
+            mock_client.messages.create = AsyncMock(side_effect=error_400)
+            mock_client_class.return_value = mock_client
+
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+                from src.core.haiku import ImageDescriptionError, haiku_describe_image
+                with pytest.raises(ImageDescriptionError) as exc_info:
+                    await haiku_describe_image(image_base64="iVBORw0KGgo==")
+
+            assert "Failed to describe image" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_image_description_error_is_subclass_of_haiku_error(self) -> None:
+        """Test that ImageDescriptionError is a subclass of HaikuError."""
+        from src.core.haiku import HaikuError, ImageDescriptionError
+        assert issubclass(ImageDescriptionError, HaikuError)
