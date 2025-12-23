@@ -621,12 +621,27 @@ class ImageSelectionTypeView(discord.ui.View):
     ) -> None:
         """Handle completed image edit from GoogleResultsCarouselView.
 
-        Stores the edited image result in the channel's context.
+        Stores the edited image result in the channel's context and displays the result.
 
         Args:
             interaction: The Discord interaction.
             result_data: The edited image data to store.
         """
+        # Handle error case
+        if result_data.get("error"):
+            error_msg = result_data.get("message")
+            error_view = InfoEmbedView(
+                message=interaction.message,
+                user=self.user,
+                title="Image edit error!",
+                description=str(error_msg) if error_msg else "An error occurred during image editing.",
+                is_error=True,
+                image_data=None,
+            )
+            await error_view.initialize(interaction)
+            return
+
+        # Store the result in context
         if self.repo and interaction.channel_id is not None:
             try:
                 await self.repo.create_channel(interaction.channel_id)
@@ -634,10 +649,10 @@ class ImageSelectionTypeView(discord.ui.View):
                 str_images = json.dumps(images)
                 await self.repo.add_message_with_images(
                     interaction.channel_id,
-                    "Anthropic",
+                    "Fal.AI",
                     "prompt",
                     False,
-                    "Edited Image",
+                    "Modified Image",
                     str_images,
                 )
                 logger.info(
@@ -651,6 +666,31 @@ class ImageSelectionTypeView(discord.ui.View):
                     view="ImageSelectionTypeView",
                     error=str(e),
                 )
+
+        # Display the result
+        success_message = (
+            "Your image was modified successfully. "
+            "You can use it for future `/prompt` and `/modify_image` commands."
+        )
+        image_data_typed: dict[str, str] = {
+            "filename": str(result_data.get("filename", "")),
+            "image": str(result_data.get("image", "")),
+        }
+        prompt = result_data.get("prompt", "")
+        output_notes = [{"name": "Prompt", "value": prompt}] if prompt else None
+        download_url = result_data.get("cloud_url")
+
+        success_view = InfoEmbedView(
+            message=interaction.message,
+            user=self.user,
+            title="Image modified",
+            description=success_message,
+            is_error=False,
+            image_data=image_data_typed,
+            notes=output_notes,
+            download_url=download_url,
+        )
+        await success_view.initialize(interaction)
 
     @discord.ui.button(label="Recent Images", style=discord.ButtonStyle.primary)
     async def recent_images_button(
