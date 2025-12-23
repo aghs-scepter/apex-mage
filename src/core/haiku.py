@@ -400,6 +400,11 @@ async def haiku_summarize_conversation(
     if not messages:
         raise SummarizationError("Cannot summarize empty conversation")
 
+    # Check if any message has actual content
+    has_content = any(msg.get("content", "").strip() for msg in messages)
+    if not has_content:
+        raise SummarizationError("Conversation contains no content")
+
     # Format conversation for the API
     conversation_text = _format_conversation_for_summary(messages)
 
