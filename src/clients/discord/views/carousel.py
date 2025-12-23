@@ -156,7 +156,15 @@ class InfoEmbedView(discord.ui.View):
             embed_image = await create_file_from_image(self.image_data)
             self.embed.set_image(url=f"attachment://{embed_image.filename}")
 
-            if interaction.response.is_done():
+            # Use self.message.edit() when message is provided (e.g., modal callbacks)
+            # This ensures we update the existing message rather than creating a new response
+            if self.message is not None:
+                await self.message.edit(
+                    embed=self.embed,
+                    attachments=[embed_image],
+                    view=self,
+                )
+            elif interaction.response.is_done():
                 await interaction.edit_original_response(
                     embed=self.embed,
                     attachments=[embed_image],
@@ -169,7 +177,14 @@ class InfoEmbedView(discord.ui.View):
                     view=self,
                 )
         else:
-            if interaction.response.is_done():
+            # Use self.message.edit() when message is provided (e.g., modal callbacks)
+            if self.message is not None:
+                await self.message.edit(
+                    attachments=[],
+                    embed=self.embed,
+                    view=self,
+                )
+            elif interaction.response.is_done():
                 await interaction.edit_original_response(
                     attachments=[],
                     embed=self.embed,

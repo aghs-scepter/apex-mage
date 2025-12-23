@@ -339,7 +339,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
             if result_data.get("error"):
                 error_msg = result_data.get("message")
                 error_view = InfoEmbedView(
-                    message=interaction.message,
+                    message=edit_interaction.message,
                     user=embed_user,
                     title="Image edit error!",
                     description=str(error_msg) if error_msg else "An error occurred during image editing.",
@@ -373,7 +373,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
                 # Get cloud_url for download button (may be None if GCS not configured)
                 download_url = result_data.get("cloud_url")
                 success_view = InfoEmbedView(
-                    message=interaction.message,
+                    message=edit_interaction.message,
                     user=embed_user,
                     title="Image modified",
                     description=success_message,
