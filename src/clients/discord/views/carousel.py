@@ -5364,3 +5364,412 @@ class DescriptionDisplayView(discord.ui.View):
                 await self.message.edit(embed=self.embed, view=self)
             except Exception:
                 pass  # Message may have been deleted
+
+
+class VariationCarouselView(discord.ui.View):
+    """A carousel view for displaying image variations.
+
+    Allows users to navigate between an original image and up to 3 variations.
+    Provides buttons for generating variations (Same Prompt or AI Remix) and
+    adding the selected image to context.
+
+    UI Layout:
+    - Embed shows current image with position indicator
+    - Source thumbnail shown above (if from modify_image)
+    - Row 0: [<] [>] navigation
+    - Row 1: [Same Prompt] [AI Remix] variation buttons
+    - Row 2: [Add to Context] [Cancel]
+    """
+
+    MAX_VARIATIONS = 3
+
+    def __init__(
+        self,
+        interaction: discord.Interaction,
+        message: discord.Message,
+        user: dict[str, Any] | None,
+        original_image: dict[str, str],
+        prompt: str,
+        source_image: dict[str, str] | None = None,
+        repo: "RepositoryAdapter | None" = None,
+    ) -> None:
+        """Initialize the variation carousel view.
+
+        Args:
+            interaction: The Discord interaction.
+            message: The message to update with the carousel.
+            user: User dict with name, id, and pfp keys.
+            original_image: The original image data with filename and image keys.
+            prompt: The prompt used for image generation.
+            source_image: Optional source image for modify_image comparison.
+            repo: Repository adapter for storing images to context.
+        """
+        super().__init__(timeout=RESULT_VIEW_TIMEOUT)
+        self.interaction = interaction
+        self.message = message
+        self.user = user
+        self.original_image = original_image
+        self.prompt = prompt
+        self.source_image = source_image
+        self.repo = repo
+        self.username, self.user_id, self.pfp = get_user_info(user)
+        self.embed: discord.Embed | None = None
+        self.added_to_context = False
+
+        # Carousel state
+        self.variations: list[dict[str, str]] = []
+        self.current_index = 0  # 0 = original, 1-3 = variations
+
+    def _get_all_images(self) -> list[dict[str, str]]:
+        """Get list of all images (original + variations)."""
+        return [self.original_image] + self.variations
+
+    def _get_current_image(self) -> dict[str, str]:
+        """Get the currently displayed image."""
+        all_images = self._get_all_images()
+        return all_images[self.current_index]
+
+    def _generate_position_indicator(self) -> str:
+        """Generate a visual position indicator for the carousel.
+
+        Returns:
+            Position indicator string like "(Original) * o o o" or "(1) * o...".
+        """
+        all_images = self._get_all_images()
+        total = len(all_images)
+
+        # Label for current position
+        if self.current_index == 0:
+            label = "(Original)"
+        else:
+            label = f"({self.current_index})"
+
+        # Build position dots
+        dots = ""
+        for i in range(total):
+            dots += "\u25cf" if i == self.current_index else "\u25cb"
+
+        # Pad remaining slots if not at max
+        remaining = (self.MAX_VARIATIONS + 1) - total
+        for _ in range(remaining):
+            dots += "\u25cb"
+
+        return f"{label} {dots}"
+
+    async def initialize(self, interaction: discord.Interaction) -> None:
+        """Create and display the carousel embed."""
+        self.embed = discord.Embed(
+            title="Image Variations",
+            description=self._generate_position_indicator(),
+            color=EMBED_COLOR_INFO,
+        )
+        self.embed.set_author(
+            name=f"{self.username} (via Apex Mage)",
+            url="https://github.com/aghs-scepter/apex-mage",
+            icon_url=self.pfp,
+        )
+
+        # Add prompt as a field (truncated if too long)
+        if self.prompt:
+            display_prompt = self.prompt
+            if len(display_prompt) > 1024:
+                display_prompt = display_prompt[:1021] + "..."
+            self.embed.add_field(
+                name="Prompt",
+                value=display_prompt,
+                inline=False,
+            )
+
+        # Create the current image file
+        current_image = self._get_current_image()
+        result_file = await create_file_from_image(current_image)
+        self.embed.set_image(url=f"attachment://{result_file.filename}")
+
+        # Build list of attachments
+        attachments: list[discord.File] = [result_file]
+
+        # Add source thumbnail if provided (for modify_image comparison)
+        if self.source_image:
+            source_file = discord.File(
+                io.BytesIO(base64.b64decode(self.source_image["image"])),
+                filename="source_thumbnail.jpeg",
+            )
+            self.embed.set_thumbnail(url="attachment://source_thumbnail.jpeg")
+            self.embed.set_footer(text="Source image shown in thumbnail")
+            attachments.append(source_file)
+
+        # Update button states
+        self._update_buttons()
+
+        await self.message.edit(
+            embed=self.embed,
+            attachments=attachments,
+            view=self,
+        )
+
+    async def _update_embed(self) -> None:
+        """Update the embed with the current image after navigation."""
+        if self.embed:
+            self.embed.description = self._generate_position_indicator()
+
+        # Create the current image file
+        current_image = self._get_current_image()
+        result_file = await create_file_from_image(current_image)
+        if self.embed:
+            self.embed.set_image(url=f"attachment://{result_file.filename}")
+
+        # Build list of attachments
+        attachments: list[discord.File] = [result_file]
+
+        # Add source thumbnail if provided
+        if self.source_image:
+            source_file = discord.File(
+                io.BytesIO(base64.b64decode(self.source_image["image"])),
+                filename="source_thumbnail.jpeg",
+            )
+            attachments.append(source_file)
+
+        # Update button states
+        self._update_buttons()
+
+        await self.message.edit(
+            embed=self.embed,
+            attachments=attachments,
+            view=self,
+        )
+
+    def _update_buttons(self) -> None:
+        """Update button disabled states based on current state."""
+        all_images = self._get_all_images()
+        total = len(all_images)
+
+        # Navigation buttons: disabled at bounds
+        self.previous_button.disabled = self.current_index <= 0
+        self.next_button.disabled = self.current_index >= total - 1
+
+        # Variation buttons: disabled after 3 variations generated
+        at_max_variations = len(self.variations) >= self.MAX_VARIATIONS
+        self.same_prompt_button.disabled = at_max_variations
+        self.ai_remix_button.disabled = at_max_variations
+
+    def _disable_all_buttons(self) -> None:
+        """Disable all non-link buttons."""
+        for child in self.children:
+            if isinstance(child, discord.ui.Button) and not child.url:
+                child.disabled = True
+
+    def _hide_buttons(self) -> None:
+        """Remove all buttons from the view."""
+        self.clear_items()
+
+    async def on_timeout(self) -> None:
+        """Update the embed when the view times out."""
+        if self.embed:
+            if not self.added_to_context:
+                self.embed.description = (
+                    "This interaction has timed out. "
+                    "The image was NOT added to context."
+                )
+            self.embed.color = EMBED_COLOR_ERROR if not self.added_to_context else EMBED_COLOR_INFO
+
+        self._disable_all_buttons()
+
+        try:
+            await self.message.edit(embed=self.embed, view=self)
+        except Exception:
+            pass  # Message may have been deleted
+
+    # Row 0: Navigation buttons
+    @discord.ui.button(label="<", style=discord.ButtonStyle.primary, row=0)
+    async def previous_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["VariationCarouselView"],
+    ) -> None:
+        """Navigate to previous image."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+        if self.current_index > 0:
+            self.current_index -= 1
+            await self._update_embed()
+
+    @discord.ui.button(label=">", style=discord.ButtonStyle.primary, row=0)
+    async def next_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["VariationCarouselView"],
+    ) -> None:
+        """Navigate to next image."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+        all_images = self._get_all_images()
+        if self.current_index < len(all_images) - 1:
+            self.current_index += 1
+            await self._update_embed()
+
+    # Row 1: Variation generation buttons
+    @discord.ui.button(label="Same Prompt", style=discord.ButtonStyle.secondary, row=1)
+    async def same_prompt_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["VariationCarouselView"],
+    ) -> None:
+        """Generate a variation using the same prompt.
+
+        Stub implementation - actual generation will be implemented in D4.
+        """
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        if len(self.variations) >= self.MAX_VARIATIONS:
+            await interaction.response.send_message(
+                "Maximum number of variations reached.",
+                ephemeral=True,
+            )
+            return
+
+        # Stub implementation for D4
+        await interaction.response.send_message(
+            "Same Prompt variation generation coming soon! (D4)",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="AI Remix", style=discord.ButtonStyle.secondary, row=1)
+    async def ai_remix_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["VariationCarouselView"],
+    ) -> None:
+        """Generate a variation with AI-remixed prompt.
+
+        Stub implementation - actual generation will be implemented in D4.
+        """
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        if len(self.variations) >= self.MAX_VARIATIONS:
+            await interaction.response.send_message(
+                "Maximum number of variations reached.",
+                ephemeral=True,
+            )
+            return
+
+        # Stub implementation for D4
+        await interaction.response.send_message(
+            "AI Remix variation generation coming soon! (D4)",
+            ephemeral=True,
+        )
+
+    # Row 2: Action buttons
+    @discord.ui.button(label="Add to Context", style=discord.ButtonStyle.success, row=2)
+    async def add_to_context_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["VariationCarouselView"],
+    ) -> None:
+        """Add the currently displayed image to the channel context."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        # Get the currently displayed image
+        current_image = self._get_current_image()
+
+        # Store the image in context
+        if self.repo and interaction.channel_id is not None:
+            try:
+                await self.repo.create_channel(interaction.channel_id)
+                images = [current_image]
+                str_images = json.dumps(images)
+                await self.repo.add_message_with_images(
+                    interaction.channel_id,
+                    "Fal.AI",
+                    "prompt",
+                    False,
+                    "Image Variation",
+                    str_images,
+                )
+                self.added_to_context = True
+                logger.info(
+                    "variation_carousel_added_to_context",
+                    view="VariationCarouselView",
+                    channel_id=interaction.channel_id,
+                    image_index=self.current_index,
+                )
+            except Exception as e:
+                logger.error(
+                    "variation_carousel_add_failed",
+                    view="VariationCarouselView",
+                    error=str(e),
+                )
+                if self.embed:
+                    self.embed.description = f"Failed to add image to context: {e}"
+                    self.embed.color = EMBED_COLOR_ERROR
+                await self.message.edit(embed=self.embed, view=self)
+                return
+
+        # Update button to show success
+        button.label = "Added to Context"
+        button.disabled = True
+        button.style = discord.ButtonStyle.secondary
+
+        # Update embed description
+        if self.embed:
+            position_label = "original" if self.current_index == 0 else f"variation {self.current_index}"
+            self.embed.description = (
+                f"Image ({position_label}) added to context successfully!\n"
+                "You can use it for future /prompt and /modify_image commands."
+            )
+
+        await self.message.edit(embed=self.embed, view=self)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger, row=2)
+    async def cancel_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["VariationCarouselView"],
+    ) -> None:
+        """Cancel the variation carousel without adding to context."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+        self._hide_buttons()
+
+        if self.embed:
+            self.embed.title = "Operation Cancelled"
+            self.embed.description = "Image variation was cancelled. No image was added to context."
+            self.embed.set_image(url=None)
+            self.embed.set_thumbnail(url=None)
+
+        await self.message.edit(embed=self.embed, attachments=[], view=self)
+        self.stop()
