@@ -5,6 +5,7 @@ import base64
 import io
 import json
 from collections.abc import Callable, Coroutine
+from os import getenv
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
@@ -23,7 +24,7 @@ from src.core.image_utils import (
 )
 from src.core.logging import get_logger
 from src.core.prompts.refinement import IMAGE_MODIFICATION_REFINEMENT_PROMPT
-from src.core.providers import ImageModifyRequest
+from src.core.providers import ImageModifyRequest, ImageRequest
 
 if TYPE_CHECKING:
     from src.adapters.gcs_adapter import GCSAdapter
@@ -4349,6 +4350,416 @@ class DescriptionEditModal(discord.ui.Modal, title="Edit Description"):
             )
 
 
+
+
+class DescriptionRoutingView(discord.ui.View):
+    """View for routing description to different actions.
+
+    After the user accepts a description, this view shows buttons to:
+    - Create Similar Image: Generate a new image using the description as prompt
+    - Use as Edit Prompt: (B5) Modify the original image using the description
+    - Copy Text: Copy the description to clipboard (uses Discord's copy feature)
+    - Cancel: Dismiss the flow
+    """
+
+    def __init__(
+        self,
+        interaction: discord.Interaction,
+        description: str,
+        reference_image_data: dict[str, str],
+        user: dict[str, Any] | None = None,
+        message: discord.Message | None = None,
+        image_provider: "ImageProvider | None" = None,
+        rate_limiter: "SlidingWindowRateLimiter | None" = None,
+        gcs_adapter: "GCSAdapter | None" = None,
+        repo: "RepositoryAdapter | None" = None,
+    ) -> None:
+        """Initialize the description routing view.
+
+        Args:
+            interaction: The Discord interaction.
+            description: The image description to route.
+            reference_image_data: The original analyzed image data for reference.
+            user: Optional user dict with 'name', 'id', and 'pfp' keys.
+            message: Optional existing message to update.
+            image_provider: Image provider for calling the generation API.
+            rate_limiter: Rate limiter for image generation.
+            gcs_adapter: GCS adapter for uploading images.
+            repo: Repository adapter for storing images to context.
+        """
+        super().__init__(timeout=USER_INTERACTION_TIMEOUT)
+        self.interaction = interaction
+        self.description = description
+        self.reference_image_data = reference_image_data
+        self.user = user
+        self.username, self.user_id, self.pfp = get_user_info(user)
+        self.message = message
+        self.image_provider = image_provider
+        self.rate_limiter = rate_limiter
+        self.gcs_adapter = gcs_adapter
+        self.repo = repo
+        self.embed: discord.Embed | None = None
+        self._generating = False
+
+    async def initialize(self, interaction: discord.Interaction) -> None:
+        """Display the routing view with buttons.
+
+        Args:
+            interaction: The Discord interaction.
+        """
+        self.embed = discord.Embed(
+            title="What would you like to do?",
+            description=(
+                f"**Your description:**\n{self.description}\n\n"
+                "Choose an action below:"
+            ),
+            color=EMBED_COLOR_INFO,
+        )
+        self.embed.set_author(
+            name=f"{self.username} (via Apex Mage)",
+            url="https://github.com/aghs-scepter/apex-mage",
+            icon_url=self.pfp,
+        )
+
+        # Show the reference image as thumbnail
+        embed_image = await create_file_from_image(self.reference_image_data)
+        self.embed.set_thumbnail(url=f"attachment://{embed_image.filename}")
+
+        if self.message is not None:
+            await self.message.edit(
+                embed=self.embed,
+                attachments=[embed_image],
+                view=self,
+            )
+        elif interaction.response.is_done():
+            self.message = await interaction.edit_original_response(
+                embed=self.embed,
+                attachments=[embed_image],
+                view=self,
+            )
+        else:
+            self.message = await interaction.followup.send(
+                embed=self.embed,
+                file=embed_image,
+                view=self,
+                wait=True,
+            )
+
+    def hide_buttons(self) -> None:
+        """Remove all buttons from the view."""
+        self.clear_items()
+
+    async def _generate_similar_image(self, interaction: discord.Interaction) -> None:
+        """Generate a new image using the description as prompt.
+
+        Args:
+            interaction: The Discord interaction.
+        """
+        self._generating = True
+        self.hide_buttons()
+
+        # Update embed to show generating state
+        if self.embed:
+            self.embed.title = "Generating Image..."
+            self.embed.description = (
+                "Using description as prompt...\n"
+                "(This may take up to 180 seconds)"
+            )
+            # Add the prompt as a field
+            display_prompt = self.description
+            if len(display_prompt) > 1024:
+                display_prompt = display_prompt[:1021] + "..."
+            self.embed.add_field(
+                name="Prompt",
+                value=display_prompt,
+                inline=False,
+            )
+
+        if self.message:
+            embed_image = await create_file_from_image(self.reference_image_data)
+            await self.message.edit(
+                embed=self.embed,
+                attachments=[embed_image],
+                view=self,
+            )
+
+        try:
+            # Check rate limit
+            if self.rate_limiter:
+                rate_check = await self.rate_limiter.check(
+                    interaction.user.id, "image"
+                )
+                if not rate_check.allowed:
+                    wait_msg = (
+                        f" Try again in {int(rate_check.wait_seconds)} seconds."
+                        if rate_check.wait_seconds
+                        else ""
+                    )
+                    error_message = (
+                        f"You're requesting too many images and have been "
+                        f"rate-limited. The bot can handle a maximum of "
+                        f"{getenv('FAL_RATE_LIMIT', '8')} image "
+                        f"requests per hour.{wait_msg}"
+                    )
+                    if self.embed:
+                        self.embed.title = "Rate Limited"
+                        self.embed.description = error_message
+                        self.embed.color = EMBED_COLOR_ERROR
+                        self.embed.clear_fields()
+                    if self.message:
+                        embed_image = await create_file_from_image(self.reference_image_data)
+                        await self.message.edit(
+                            embed=self.embed,
+                            attachments=[embed_image],
+                            view=self,
+                        )
+                    self._generating = False
+                    return
+
+            # Generate the image
+            if not self.image_provider:
+                raise RuntimeError("Image provider not initialized")
+
+            # Store the prompt in repo if available
+            if self.repo and interaction.channel_id:
+                await self.repo.create_channel(interaction.channel_id)
+                await self.repo.add_message(
+                    interaction.channel_id, "Fal.AI", "prompt", True, self.description
+                )
+
+            async with asyncio.timeout(API_TIMEOUT_SECONDS):
+                generated_images = await self.image_provider.generate(
+                    ImageRequest(prompt=self.description)
+                )
+            generated_image = generated_images[0]
+
+            if generated_image.url is None:
+                raise ValueError("Generated image has no URL")
+
+            image_b64 = image_strip_headers(generated_image.url, "jpeg")
+            image_b64 = await asyncio.to_thread(compress_image, image_b64)
+
+            # Record the request after successful operation
+            if self.rate_limiter:
+                await self.rate_limiter.record(interaction.user.id, "image")
+
+            has_nsfw = generated_image.has_nsfw_content or False
+            output_filename = "image.jpeg"
+            if has_nsfw:
+                output_filename = "SPOILER_image.jpeg"
+
+            # Upload to GCS for download button
+            download_url: str | None = None
+            if self.gcs_adapter and interaction.channel_id is not None:
+                try:
+                    download_url = await asyncio.to_thread(
+                        self.gcs_adapter.upload_generated_image,
+                        interaction.channel_id,
+                        image_b64,
+                    )
+                    logger.info(
+                        "image_uploaded_to_gcs",
+                        channel_id=interaction.channel_id,
+                        download_url=download_url,
+                    )
+                except Exception as upload_error:
+                    logger.error(
+                        "gcs_upload_failed",
+                        channel_id=interaction.channel_id,
+                        error=str(upload_error),
+                    )
+                    # Continue without download URL - image still shows
+
+            # Show ImageGenerationResultView with the result
+            result_view = ImageGenerationResultView(
+                interaction=interaction,
+                message=self.message,
+                user=self.user,
+                image_data={
+                    "filename": output_filename,
+                    "image": image_b64,
+                },
+                prompt=self.description,
+                download_url=download_url,
+                repo=self.repo,
+            )
+            await result_view.initialize(interaction)
+            self._generating = False
+            self.stop()
+
+        except TimeoutError:
+            logger.error("image_generation_timeout", timeout_seconds=API_TIMEOUT_SECONDS)
+            if self.embed:
+                self.embed.title = "Generation Timed Out"
+                self.embed.description = (
+                    "Image generation timed out after 180 seconds. "
+                    "Please try again."
+                )
+                self.embed.color = EMBED_COLOR_ERROR
+                self.embed.clear_fields()
+            if self.message:
+                embed_image = await create_file_from_image(self.reference_image_data)
+                await self.message.edit(
+                    embed=self.embed,
+                    attachments=[embed_image],
+                    view=self,
+                )
+            self._generating = False
+
+        except Exception as ex:
+            logger.error(
+                "image_generation_error",
+                view="DescriptionRoutingView",
+                error=str(ex),
+            )
+            if self.embed:
+                self.embed.title = "Generation Failed"
+                self.embed.description = f"An error occurred: {ex}"
+                self.embed.color = EMBED_COLOR_ERROR
+                self.embed.clear_fields()
+            if self.message:
+                embed_image = await create_file_from_image(self.reference_image_data)
+                await self.message.edit(
+                    embed=self.embed,
+                    attachments=[embed_image],
+                    view=self,
+                )
+            self._generating = False
+
+    @discord.ui.button(
+        label="Create Similar Image",
+        style=discord.ButtonStyle.primary,
+        row=0,
+    )
+    async def create_similar_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescriptionRoutingView"],
+    ) -> None:
+        """Generate a new image using the description as prompt."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        if self._generating:
+            await interaction.response.send_message(
+                "Please wait for the current operation to complete.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+        await self._generate_similar_image(interaction)
+
+    @discord.ui.button(
+        label="Use as Edit Prompt",
+        style=discord.ButtonStyle.secondary,
+        row=0,
+        disabled=True,  # B5 will implement this
+    )
+    async def use_as_edit_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescriptionRoutingView"],
+    ) -> None:
+        """Use the description to modify the original image (B5 stub)."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        # B5 will implement this functionality
+        await interaction.response.send_message(
+            "This feature is coming soon in a future update.",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(
+        label="Copy Text",
+        style=discord.ButtonStyle.secondary,
+        row=1,
+    )
+    async def copy_text_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescriptionRoutingView"],
+    ) -> None:
+        """Send the description as an ephemeral message for easy copying."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        # Send the description as ephemeral so user can copy it
+        await interaction.response.send_message(
+            f"**Description (click to copy):**\n```\n{self.description}\n```",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(
+        label="X",
+        style=discord.ButtonStyle.danger,
+        row=1,
+    )
+    async def cancel_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescriptionRoutingView"],
+    ) -> None:
+        """Cancel the routing flow."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can cancel this.",
+                ephemeral=True,
+            )
+            return
+
+        if self._generating:
+            await interaction.response.send_message(
+                "Cannot cancel while generating. Please wait.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+        self.hide_buttons()
+
+        if self.embed:
+            self.embed.title = "Operation Cancelled"
+            self.embed.description = "Description routing was cancelled."
+            self.embed.set_thumbnail(url=None)
+            self.embed.clear_fields()
+
+        if self.message:
+            await self.message.edit(embed=self.embed, attachments=[], view=self)
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        """Update the embed on timeout."""
+        if self._generating:
+            return  # Don't timeout during generation
+
+        self.hide_buttons()
+        if self.embed:
+            self.embed.title = "Session Expired"
+            self.embed.description = (
+                "This interaction has timed out. Please start again."
+            )
+            self.embed.clear_fields()
+        if self.message:
+            try:
+                await self.message.edit(embed=self.embed, view=self)
+            except Exception:
+                pass  # Message may have been deleted
+
+
 class DescriptionDisplayView(discord.ui.View):
     """View for displaying an image description with edit and accept options.
 
@@ -4365,6 +4776,10 @@ class DescriptionDisplayView(discord.ui.View):
         image_data: dict[str, str],
         user: dict[str, Any] | None = None,
         message: discord.Message | None = None,
+        image_provider: "ImageProvider | None" = None,
+        rate_limiter: "SlidingWindowRateLimiter | None" = None,
+        gcs_adapter: "GCSAdapter | None" = None,
+        repo: "RepositoryAdapter | None" = None,
     ) -> None:
         """Initialize the description display view.
 
@@ -4373,8 +4788,13 @@ class DescriptionDisplayView(discord.ui.View):
             image_data: Dict with 'filename' and 'image' (base64) keys.
             user: Optional user dict with 'name', 'id', and 'pfp' keys.
             message: Optional existing message to update.
+            image_provider: Image provider for calling the generation API.
+            rate_limiter: Rate limiter for image generation.
+            gcs_adapter: GCS adapter for uploading images.
+            repo: Repository adapter for storing images to context.
         """
         super().__init__(timeout=USER_INTERACTION_TIMEOUT)
+        self.interaction = interaction
         self.user = user
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.image_data = image_data
@@ -4382,6 +4802,10 @@ class DescriptionDisplayView(discord.ui.View):
         self.description: str = ""
         self.embed: discord.Embed | None = None
         self._generating = False
+        self.image_provider = image_provider
+        self.rate_limiter = rate_limiter
+        self.gcs_adapter = gcs_adapter
+        self.repo = repo
 
     async def initialize(self, interaction: discord.Interaction) -> None:
         """Generate description and display the view.
@@ -4530,37 +4954,29 @@ class DescriptionDisplayView(discord.ui.View):
                 view=self,
             )
 
-    async def _show_routing_placeholder(
+    async def _show_routing_view(
         self, interaction: discord.Interaction
     ) -> None:
-        """Show routing buttons placeholder (B4/B5 stub).
+        """Show routing buttons to choose what to do with the description.
 
-        In the full implementation, this will show buttons to route to
-        create_image (B4) or modify_image (B5). For now, shows a placeholder.
+        Shows DescriptionRoutingView with options to create a similar image,
+        use as edit prompt, copy text, or cancel.
 
         Args:
             interaction: The Discord interaction.
         """
-        self.hide_buttons()
-
-        if self.embed:
-            self.embed.title = "Description Ready"
-            self.embed.description = (
-                f"**Your description:**\n{self.description}\n\n"
-                "**Routing options coming in B4/B5:**\n"
-                "- [Create Similar Image] - Use description as prompt\n"
-                "- [Use as Edit Prompt] - Modify the original image\n"
-                "- [Copy Text] - Copy description to clipboard\n"
-                "- [Cancel] - Dismiss"
-            )
-
-        if self.message:
-            embed_image = await create_file_from_image(self.image_data)
-            await self.message.edit(
-                embed=self.embed,
-                attachments=[embed_image],
-                view=self,
-            )
+        routing_view = DescriptionRoutingView(
+            interaction=interaction,
+            description=self.description,
+            reference_image_data=self.image_data,
+            user=self.user,
+            message=self.message,
+            image_provider=self.image_provider,
+            rate_limiter=self.rate_limiter,
+            gcs_adapter=self.gcs_adapter,
+            repo=self.repo,
+        )
+        await routing_view.initialize(interaction)
 
     @discord.ui.button(label="Edit Description", style=discord.ButtonStyle.secondary)
     async def edit_button(
@@ -4611,7 +5027,7 @@ class DescriptionDisplayView(discord.ui.View):
             return
 
         await interaction.response.defer()
-        await self._show_routing_placeholder(interaction)
+        await self._show_routing_view(interaction)
         self.stop()
 
     @discord.ui.button(label="X", style=discord.ButtonStyle.danger)

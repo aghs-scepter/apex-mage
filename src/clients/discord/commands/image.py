@@ -530,6 +530,10 @@ def register_image_commands(bot: "DiscordBot") -> None:
                 image_data=image_data,
                 user=embed_user,
                 message=img_interaction.message,
+                image_provider=bot.image_provider,
+                rate_limiter=bot.rate_limiter,
+                gcs_adapter=bot.gcs_adapter,
+                repo=bot.repo,
             )
             await description_view.initialize(img_interaction)
 
