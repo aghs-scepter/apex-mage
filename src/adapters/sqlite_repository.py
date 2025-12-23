@@ -127,6 +127,29 @@ CREATE TABLE IF NOT EXISTS search_rejections (
 );
 """
 
+_CREATE_PROMPT_REFINEMENTS_TABLE = """
+CREATE TABLE IF NOT EXISTS prompt_refinements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    original_prompt TEXT NOT NULL,
+    refined_prompt TEXT NOT NULL,
+    refinement_type TEXT NOT NULL,
+    was_used BOOLEAN NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+_CREATE_PROMPT_REFINEMENTS_CHANNEL_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_prompt_refinements_channel_id
+ON prompt_refinements(channel_id);
+"""
+
+_CREATE_PROMPT_REFINEMENTS_TYPE_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_prompt_refinements_type
+ON prompt_refinements(refinement_type);
+"""
+
 _CREATE_SEARCH_REJECTIONS_USER_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_search_rejections_user_id
 ON search_rejections(user_id);
@@ -435,6 +458,21 @@ INSERT INTO search_rejections (user_id, channel_id, guild_id, query_text, reject
 VALUES (?, ?, ?, ?, ?);
 """
 
+# Prompt refinements queries
+_INSERT_PROMPT_REFINEMENT = """
+INSERT INTO prompt_refinements (channel_id, user_id, original_prompt, refined_prompt, refinement_type, was_used)
+VALUES (?, ?, ?, ?, ?, ?);
+"""
+
+_SELECT_REFINEMENT_STATS = """
+SELECT
+    refinement_type,
+    COUNT(*) AS total_count,
+    SUM(CASE WHEN was_used = 1 THEN 1 ELSE 0 END) AS used_count
+FROM prompt_refinements
+GROUP BY refinement_type;
+"""
+
 
 # =============================================================================
 # Repository Implementation
@@ -527,6 +565,9 @@ class SQLiteRepository:
             self._connection.execute(_CREATE_SEARCH_REJECTIONS_USER_INDEX)
             self._connection.execute(_CREATE_SEARCH_REJECTIONS_CHANNEL_INDEX)
             self._connection.execute(_CREATE_SEARCH_REJECTIONS_CREATED_INDEX)
+            self._connection.execute(_CREATE_PROMPT_REFINEMENTS_TABLE)
+            self._connection.execute(_CREATE_PROMPT_REFINEMENTS_CHANNEL_INDEX)
+            self._connection.execute(_CREATE_PROMPT_REFINEMENTS_TYPE_INDEX)
             self._connection.commit()
 
         await asyncio.to_thread(init_sync)
@@ -1299,3 +1340,85 @@ class SQLiteRepository:
         logger.debug(
             f"Logged search rejection for user {user_id} in channel {channel_id}"
         )
+
+    # =========================================================================
+    # PromptRefinementRepository Implementation
+    # =========================================================================
+
+    async def save_prompt_refinement(
+        self,
+        channel_id: int,
+        user_id: int,
+        original_prompt: str,
+        refined_prompt: str,
+        refinement_type: str,
+        was_used: bool,
+    ) -> None:
+        """Save a prompt refinement record for analytics.
+
+        Records when a user's prompt is refined by AI assistance and whether
+        the user chose to use the refined version.
+
+        Args:
+            channel_id: The Discord channel ID where the refinement occurred.
+            user_id: The Discord user ID who triggered the refinement.
+            original_prompt: The user's original prompt text.
+            refined_prompt: The AI-refined prompt text.
+            refinement_type: Type of refinement ('create_image', 'modify_image',
+                or 'describe_this').
+            was_used: Whether the user selected the refined version.
+        """
+        conn = self._ensure_connected()
+
+        def insert_sync() -> None:
+            conn.execute(
+                _INSERT_PROMPT_REFINEMENT,
+                (channel_id, user_id, original_prompt, refined_prompt, refinement_type, was_used),
+            )
+            conn.commit()
+
+        await asyncio.to_thread(insert_sync)
+        logger.debug(
+            f"Saved prompt refinement for user {user_id} in channel {channel_id}, "
+            f"type={refinement_type}, was_used={was_used}"
+        )
+
+    async def get_refinement_stats(self) -> dict[str, dict[str, int]]:
+        """Get aggregated statistics on prompt refinements.
+
+        Returns counts grouped by refinement type, including total count
+        and how many refinements were actually used by users.
+
+        Returns:
+            Dictionary mapping refinement_type to stats dict with keys:
+            - 'total': Total number of refinements of this type
+            - 'used': Number of refinements that were actually used
+            - 'usage_rate': Percentage of refinements used (0-100)
+
+            Example:
+            {
+                'create_image': {'total': 100, 'used': 75, 'usage_rate': 75},
+                'modify_image': {'total': 50, 'used': 30, 'usage_rate': 60},
+            }
+        """
+        conn = self._ensure_connected()
+
+        def query_sync() -> list[sqlite3.Row]:
+            cursor = conn.execute(_SELECT_REFINEMENT_STATS)
+            return cursor.fetchall()
+
+        rows = await asyncio.to_thread(query_sync)
+
+        stats: dict[str, dict[str, int]] = {}
+        for row in rows:
+            refinement_type = row["refinement_type"]
+            total = row["total_count"]
+            used = row["used_count"]
+            usage_rate = round((used / total) * 100) if total > 0 else 0
+            stats[refinement_type] = {
+                "total": total,
+                "used": used,
+                "usage_rate": usage_rate,
+            }
+
+        return stats
