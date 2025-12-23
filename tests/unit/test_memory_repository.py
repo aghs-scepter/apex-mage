@@ -904,3 +904,208 @@ class TestEdgeCases:
         found = await repo.get_by_hash("scopedkey")
         assert found is not None
         assert found.scopes == scopes
+
+
+# =============================================================================
+# PromptRefinementRepository Tests
+# =============================================================================
+
+
+class TestPromptRefinementRepository:
+    """Tests for prompt refinement storage and analytics."""
+
+    async def test_save_prompt_refinement(self, repo: MemoryRepository) -> None:
+        """Test that save_prompt_refinement stores the refinement record."""
+        await repo.save_prompt_refinement(
+            channel_id=12345,
+            user_id=67890,
+            original_prompt="a cat",
+            refined_prompt="A fluffy orange tabby cat lounging in sunlight",
+            refinement_type="create_image",
+            was_used=True,
+        )
+
+        # Verify storage by checking internal list
+        assert len(repo._prompt_refinements) == 1
+        record = repo._prompt_refinements[0]
+        assert record["channel_id"] == 12345
+        assert record["user_id"] == 67890
+        assert record["original_prompt"] == "a cat"
+        assert record["refined_prompt"] == "A fluffy orange tabby cat lounging in sunlight"
+        assert record["refinement_type"] == "create_image"
+        assert record["was_used"] is True
+        assert "created_at" in record
+
+    async def test_save_prompt_refinement_was_used_false(
+        self, repo: MemoryRepository
+    ) -> None:
+        """Test saving a refinement that was not used by the user."""
+        await repo.save_prompt_refinement(
+            channel_id=11111,
+            user_id=22222,
+            original_prompt="make it darker",
+            refined_prompt="Reduce brightness and increase contrast",
+            refinement_type="modify_image",
+            was_used=False,
+        )
+
+        assert len(repo._prompt_refinements) == 1
+        record = repo._prompt_refinements[0]
+        assert record["was_used"] is False
+        assert record["refinement_type"] == "modify_image"
+
+    async def test_get_refinement_stats_empty(self, repo: MemoryRepository) -> None:
+        """Test that get_refinement_stats returns empty dict when no refinements."""
+        stats = await repo.get_refinement_stats()
+
+        assert stats == {}
+
+    async def test_get_refinement_stats_single_type_mixed_used(
+        self, repo: MemoryRepository
+    ) -> None:
+        """Test stats for single type with mixed was_used values."""
+        # Add 4 refinements: 3 used, 1 not used
+        for i in range(3):
+            await repo.save_prompt_refinement(
+                channel_id=12345,
+                user_id=i,
+                original_prompt=f"prompt {i}",
+                refined_prompt=f"refined {i}",
+                refinement_type="create_image",
+                was_used=True,
+            )
+
+        await repo.save_prompt_refinement(
+            channel_id=12345,
+            user_id=99,
+            original_prompt="not used prompt",
+            refined_prompt="not used refined",
+            refinement_type="create_image",
+            was_used=False,
+        )
+
+        stats = await repo.get_refinement_stats()
+
+        assert "create_image" in stats
+        assert stats["create_image"]["total"] == 4
+        assert stats["create_image"]["used"] == 3
+        assert stats["create_image"]["usage_rate"] == 75  # 3/4 = 75%
+
+    async def test_get_refinement_stats_multiple_types(
+        self, repo: MemoryRepository
+    ) -> None:
+        """Test stats aggregation across multiple refinement types."""
+        # create_image: 2 total, 2 used (100%)
+        for i in range(2):
+            await repo.save_prompt_refinement(
+                channel_id=12345,
+                user_id=i,
+                original_prompt=f"create prompt {i}",
+                refined_prompt=f"create refined {i}",
+                refinement_type="create_image",
+                was_used=True,
+            )
+
+        # modify_image: 3 total, 1 used (33%)
+        await repo.save_prompt_refinement(
+            channel_id=12345,
+            user_id=10,
+            original_prompt="modify 1",
+            refined_prompt="modify refined 1",
+            refinement_type="modify_image",
+            was_used=True,
+        )
+        for i in range(2):
+            await repo.save_prompt_refinement(
+                channel_id=12345,
+                user_id=11 + i,
+                original_prompt=f"modify {i + 2}",
+                refined_prompt=f"modify refined {i + 2}",
+                refinement_type="modify_image",
+                was_used=False,
+            )
+
+        # describe_this: 1 total, 0 used (0%)
+        await repo.save_prompt_refinement(
+            channel_id=12345,
+            user_id=20,
+            original_prompt="describe",
+            refined_prompt="describe refined",
+            refinement_type="describe_this",
+            was_used=False,
+        )
+
+        stats = await repo.get_refinement_stats()
+
+        assert len(stats) == 3
+
+        assert stats["create_image"]["total"] == 2
+        assert stats["create_image"]["used"] == 2
+        assert stats["create_image"]["usage_rate"] == 100
+
+        assert stats["modify_image"]["total"] == 3
+        assert stats["modify_image"]["used"] == 1
+        assert stats["modify_image"]["usage_rate"] == 33  # round(1/3 * 100) = 33
+
+        assert stats["describe_this"]["total"] == 1
+        assert stats["describe_this"]["used"] == 0
+        assert stats["describe_this"]["usage_rate"] == 0
+
+    async def test_get_refinement_stats_all_used(
+        self, repo: MemoryRepository
+    ) -> None:
+        """Test usage_rate is 100 when all refinements are used."""
+        for i in range(5):
+            await repo.save_prompt_refinement(
+                channel_id=12345,
+                user_id=i,
+                original_prompt=f"prompt {i}",
+                refined_prompt=f"refined {i}",
+                refinement_type="create_image",
+                was_used=True,
+            )
+
+        stats = await repo.get_refinement_stats()
+
+        assert stats["create_image"]["usage_rate"] == 100
+
+    async def test_get_refinement_stats_none_used(
+        self, repo: MemoryRepository
+    ) -> None:
+        """Test usage_rate is 0 when no refinements are used."""
+        for i in range(3):
+            await repo.save_prompt_refinement(
+                channel_id=12345,
+                user_id=i,
+                original_prompt=f"prompt {i}",
+                refined_prompt=f"refined {i}",
+                refinement_type="modify_image",
+                was_used=False,
+            )
+
+        stats = await repo.get_refinement_stats()
+
+        assert stats["modify_image"]["total"] == 3
+        assert stats["modify_image"]["used"] == 0
+        assert stats["modify_image"]["usage_rate"] == 0
+
+    async def test_reset_clears_prompt_refinements(
+        self, repo: MemoryRepository
+    ) -> None:
+        """Test that reset() clears prompt refinement data."""
+        await repo.save_prompt_refinement(
+            channel_id=12345,
+            user_id=1,
+            original_prompt="test",
+            refined_prompt="test refined",
+            refinement_type="create_image",
+            was_used=True,
+        )
+
+        assert len(repo._prompt_refinements) == 1
+
+        repo.reset()
+
+        assert len(repo._prompt_refinements) == 0
+        stats = await repo.get_refinement_stats()
+        assert stats == {}

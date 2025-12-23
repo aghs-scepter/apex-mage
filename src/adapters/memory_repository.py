@@ -77,6 +77,9 @@ class MemoryRepository:
         self._search_rejections: list[dict[str, Any]] = []
         self._search_rejection_id_counter: int = 1
 
+        # Prompt refinements: list of refinement records
+        self._prompt_refinements: list[dict[str, Any]] = []
+
     async def __aenter__(self) -> "MemoryRepository":
         """Async context manager entry: connect to the repository."""
         await self.connect()
@@ -822,6 +825,91 @@ class MemoryRepository:
         self._search_rejection_id_counter += 1
 
     # =========================================================================
+    # PromptRefinementRepository Implementation
+    # =========================================================================
+
+    async def save_prompt_refinement(
+        self,
+        channel_id: int,
+        user_id: int,
+        original_prompt: str,
+        refined_prompt: str,
+        refinement_type: str,
+        was_used: bool,
+    ) -> None:
+        """Save a prompt refinement record for analytics.
+
+        Records when a user's prompt is refined by AI assistance and whether
+        the user chose to use the refined version.
+
+        Args:
+            channel_id: The Discord channel ID where the refinement occurred.
+            user_id: The Discord user ID who triggered the refinement.
+            original_prompt: The user's original prompt text.
+            refined_prompt: The AI-refined prompt text.
+            refinement_type: Type of refinement ('create_image', 'modify_image',
+                or 'describe_this').
+            was_used: Whether the user selected the refined version.
+        """
+        self._ensure_connected()
+
+        self._prompt_refinements.append({
+            "channel_id": channel_id,
+            "user_id": user_id,
+            "original_prompt": original_prompt,
+            "refined_prompt": refined_prompt,
+            "refinement_type": refinement_type,
+            "was_used": was_used,
+            "created_at": self._now().isoformat(),
+        })
+
+    async def get_refinement_stats(self) -> dict[str, dict[str, int]]:
+        """Get aggregated statistics on prompt refinements.
+
+        Returns counts grouped by refinement type, including total count
+        and how many refinements were actually used by users.
+
+        Returns:
+            Dictionary mapping refinement_type to stats dict with keys:
+            - 'total': Total number of refinements of this type
+            - 'used': Number of refinements that were actually used
+            - 'usage_rate': Percentage of refinements used (0-100)
+
+            Example:
+            {
+                'create_image': {'total': 100, 'used': 75, 'usage_rate': 75},
+                'modify_image': {'total': 50, 'used': 30, 'usage_rate': 60},
+            }
+        """
+        self._ensure_connected()
+
+        # Aggregate counts by refinement_type
+        type_counts: dict[str, dict[str, int]] = {}
+
+        for refinement in self._prompt_refinements:
+            rtype = refinement["refinement_type"]
+            if rtype not in type_counts:
+                type_counts[rtype] = {"total": 0, "used": 0}
+
+            type_counts[rtype]["total"] += 1
+            if refinement["was_used"]:
+                type_counts[rtype]["used"] += 1
+
+        # Calculate usage_rate for each type
+        stats: dict[str, dict[str, int]] = {}
+        for rtype, counts in type_counts.items():
+            total = counts["total"]
+            used = counts["used"]
+            usage_rate = round((used / total) * 100) if total > 0 else 0
+            stats[rtype] = {
+                "total": total,
+                "used": used,
+                "usage_rate": usage_rate,
+            }
+
+        return stats
+
+    # =========================================================================
     # Testing Utilities
     # =========================================================================
 
@@ -850,3 +938,5 @@ class MemoryRepository:
 
         self._search_rejections.clear()
         self._search_rejection_id_counter = 1
+
+        self._prompt_refinements.clear()
