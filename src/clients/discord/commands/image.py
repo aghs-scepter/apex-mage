@@ -18,6 +18,7 @@ from src.clients.discord.views.carousel import (
     InfoEmbedView,
     MultiImageCarouselView,
 )
+from src.clients.discord.views.prompt_refinement import PromptRefinementView
 from src.core.image_utils import (
     compress_image,
     format_image_response,
@@ -143,172 +144,199 @@ def register_image_commands(bot: "DiscordBot") -> None:
 
         embed_user = create_embed_user(interaction)
 
-        try:
-            async with asyncio.timeout(timeout):
-                rate_check = await bot.rate_limiter.check(interaction.user.id, "image")
+        async def generate_image_with_prompt(
+            gen_interaction: discord.Interaction, final_prompt: str
+        ) -> None:
+            """Generate the image with the given prompt (original or refined).
 
-                if rate_check.allowed:
-                    display_prompt, full_prompt_url = await handle_text_overflow(
-                        bot, "prompt", prompt, channel_id
-                    )
-
-                    await bot.repo.create_channel(channel_id)
-                    await bot.repo.add_message(
-                        channel_id, "Fal.AI", "prompt", True, prompt
-                    )
-
-                    processing_message = (
-                        "Generating an image... (This may take up to 180 seconds)"
-                    )
-                    processing_notes = [{"name": "Prompt", "value": display_prompt}]
-                    processing_view = InfoEmbedView(
-                        message=interaction.message,
-                        user=embed_user,
-                        title="Image generation in progress",
-                        description=processing_message,
-                        is_error=False,
-                        notes=processing_notes,
-                        full_prompt_url=full_prompt_url,
-                    )
-                    await processing_view.initialize(interaction)
-
-                    generated_images = await bot.image_provider.generate(
-                        ImageRequest(prompt=prompt)
-                    )
-                    generated_image = generated_images[0]
-                    if generated_image.url is None:
-                        raise ValueError("Generated image has no URL")
-                    image_data = image_strip_headers(generated_image.url, "jpeg")
-                    image_data = await asyncio.to_thread(compress_image, image_data)
-                    str_image = json.dumps(
-                        [{"filename": "image.jpeg", "image": image_data}]
-                    )
-                    await bot.repo.add_message_with_images(
-                        channel_id,
-                        "Fal.AI",
-                        "prompt",
-                        False,
-                        "Image",
-                        str_image,
+            This callback is invoked by PromptRefinementView when the user
+            chooses to generate with either the original or refined prompt.
+            """
+            try:
+                async with asyncio.timeout(timeout):
+                    rate_check = await bot.rate_limiter.check(
+                        interaction.user.id, "image"
                     )
 
-                    await bot.rate_limiter.record(interaction.user.id, "image")
-
-                    has_nsfw = generated_image.has_nsfw_content or False
-                    output_filename, _ = format_image_response(
-                        image_data, "jpeg", has_nsfw
-                    )
-
-                    # Upload image to GCS for download button
-                    download_url: str | None = None
-                    try:
-                        download_url = await asyncio.to_thread(
-                            bot.gcs_adapter.upload_generated_image,
-                            channel_id,
-                            image_data,
+                    if rate_check.allowed:
+                        display_prompt, full_prompt_url = await handle_text_overflow(
+                            bot, "prompt", final_prompt, channel_id
                         )
-                        logger.info(
-                            "image_uploaded_to_gcs",
-                            channel_id=channel_id,
+
+                        await bot.repo.create_channel(channel_id)
+                        await bot.repo.add_message(
+                            channel_id, "Fal.AI", "prompt", True, final_prompt
+                        )
+
+                        processing_message = (
+                            "Generating an image... (This may take up to 180 seconds)"
+                        )
+                        processing_notes = [{"name": "Prompt", "value": display_prompt}]
+                        processing_view = InfoEmbedView(
+                            message=gen_interaction.message,
+                            user=embed_user,
+                            title="Image generation in progress",
+                            description=processing_message,
+                            is_error=False,
+                            notes=processing_notes,
+                            full_prompt_url=full_prompt_url,
+                        )
+                        await processing_view.initialize(gen_interaction)
+
+                        generated_images = await bot.image_provider.generate(
+                            ImageRequest(prompt=final_prompt)
+                        )
+                        generated_image = generated_images[0]
+                        if generated_image.url is None:
+                            raise ValueError("Generated image has no URL")
+                        image_data = image_strip_headers(generated_image.url, "jpeg")
+                        image_data = await asyncio.to_thread(
+                            compress_image, image_data
+                        )
+                        str_image = json.dumps(
+                            [{"filename": "image.jpeg", "image": image_data}]
+                        )
+                        await bot.repo.add_message_with_images(
+                            channel_id,
+                            "Fal.AI",
+                            "prompt",
+                            False,
+                            "Image",
+                            str_image,
+                        )
+
+                        await bot.rate_limiter.record(interaction.user.id, "image")
+
+                        has_nsfw = generated_image.has_nsfw_content or False
+                        output_filename, _ = format_image_response(
+                            image_data, "jpeg", has_nsfw
+                        )
+
+                        # Upload image to GCS for download button
+                        download_url: str | None = None
+                        try:
+                            download_url = await asyncio.to_thread(
+                                bot.gcs_adapter.upload_generated_image,
+                                channel_id,
+                                image_data,
+                            )
+                            logger.info(
+                                "image_uploaded_to_gcs",
+                                channel_id=channel_id,
+                                download_url=download_url,
+                            )
+                        except Exception as upload_error:
+                            logger.error(
+                                "gcs_upload_failed",
+                                channel_id=channel_id,
+                                error=str(upload_error),
+                            )
+                            # Continue without download URL - image still shows
+
+                        output_message = (
+                            "Your image was created successfully. "
+                            "You can use it for future `/prompt` and "
+                            "`/modify_image` commands."
+                        )
+                        output_notes = [{"name": "Prompt", "value": display_prompt}]
+                        output_view = InfoEmbedView(
+                            message=gen_interaction.message,
+                            user=embed_user,
+                            title="Image generation successful",
+                            description=output_message,
+                            is_error=False,
+                            notes=output_notes,
+                            full_prompt_url=full_prompt_url,
+                            image_data={
+                                "filename": output_filename,
+                                "image": image_data,
+                            },
                             download_url=download_url,
                         )
-                    except Exception as upload_error:
-                        logger.error(
-                            "gcs_upload_failed",
-                            channel_id=channel_id,
-                            error=str(upload_error),
+                        await output_view.initialize(gen_interaction)
+                    else:
+                        wait_msg = (
+                            f" Try again in {int(rate_check.wait_seconds)} seconds."
+                            if rate_check.wait_seconds
+                            else ""
                         )
-                        # Continue without download URL - image still shows
+                        error_message = (
+                            f"You're requesting too many images and have been "
+                            f"rate-limited. The bot can handle a maximum of "
+                            f"{getenv('FAL_RATE_LIMIT', '8')} `/create_image` "
+                            f"requests per hour.{wait_msg}"
+                        )
 
-                    output_message = (
-                        "Your image was created successfully. "
-                        "You can use it for future `/prompt` and `/modify_image` commands."
-                    )
-                    output_notes = [{"name": "Prompt", "value": display_prompt}]
-                    output_view = InfoEmbedView(
-                        message=interaction.message,
-                        user=embed_user,
-                        title="Image generation successful",
-                        description=output_message,
-                        is_error=False,
-                        notes=output_notes,
-                        full_prompt_url=full_prompt_url,
-                        image_data={"filename": output_filename, "image": image_data},
-                        download_url=download_url,
-                    )
-                    await output_view.initialize(interaction)
-                else:
-                    wait_msg = (
-                        f" Try again in {int(rate_check.wait_seconds)} seconds."
-                        if rate_check.wait_seconds
-                        else ""
-                    )
-                    error_message = (
-                        f"You're requesting too many images and have been rate-limited. "
-                        f"The bot can handle a maximum of "
-                        f"{getenv('FAL_RATE_LIMIT', '8')} `/create_image` requests "
-                        f"per hour.{wait_msg}"
-                    )
+                        display_prompt, full_prompt_url = await handle_text_overflow(
+                            bot, "prompt", final_prompt, channel_id
+                        )
 
-                    display_prompt, full_prompt_url = await handle_text_overflow(
-                        bot, "prompt", prompt, channel_id
-                    )
+                        error_notes = [{"name": "Prompt", "value": display_prompt}]
+                        error_view = InfoEmbedView(
+                            message=gen_interaction.message,
+                            user=embed_user,
+                            title="Image generation error!",
+                            description=error_message,
+                            is_error=True,
+                            image_data=None,
+                            notes=error_notes,
+                            full_prompt_url=full_prompt_url,
+                        )
+                        await error_view.initialize(gen_interaction)
 
-                    error_notes = [{"name": "Prompt", "value": display_prompt}]
-                    error_view = InfoEmbedView(
-                        message=interaction.message,
-                        user=embed_user,
-                        title="Image generation error!",
-                        description=error_message,
-                        is_error=True,
-                        image_data=None,
-                        notes=error_notes,
-                        full_prompt_url=full_prompt_url,
-                    )
-                    await error_view.initialize(interaction)
+            except TimeoutError:
+                error_message = (
+                    f"The image generation request timed out after {timeout} "
+                    "seconds. Please try again."
+                )
 
-        except TimeoutError:
-            error_message = (
-                f"The image generation request timed out after {timeout} seconds. "
-                "Please try again."
-            )
+                display_prompt, full_prompt_url = await handle_text_overflow(
+                    bot, "prompt", final_prompt, channel_id
+                )
 
-            display_prompt, full_prompt_url = await handle_text_overflow(
-                bot, "prompt", prompt, channel_id
-            )
+                error_notes = [{"name": "Prompt", "value": display_prompt}]
+                error_view = InfoEmbedView(
+                    message=gen_interaction.message,
+                    user=embed_user,
+                    title="Image generation error!",
+                    description=error_message,
+                    is_error=True,
+                    image_data=None,
+                    notes=error_notes,
+                    full_prompt_url=full_prompt_url,
+                )
+                await error_view.initialize(gen_interaction)
 
-            error_notes = [{"name": "Prompt", "value": display_prompt}]
-            error_view = InfoEmbedView(
-                message=interaction.message,
-                user=embed_user,
-                title="Image generation error!",
-                description=error_message,
-                is_error=True,
-                image_data=None,
-                notes=error_notes,
-                full_prompt_url=full_prompt_url,
-            )
-            await error_view.initialize(interaction)
+            except Exception:
+                error_message = (
+                    "An unexpected error occurred while processing your request."
+                )
 
-        except Exception:
-            error_message = "An unexpected error occurred while processing your request."
+                display_prompt, full_prompt_url = await handle_text_overflow(
+                    bot, "prompt", final_prompt, channel_id
+                )
 
-            display_prompt, full_prompt_url = await handle_text_overflow(
-                bot, "prompt", prompt, channel_id
-            )
+                error_notes = [{"name": "Prompt", "value": display_prompt}]
+                error_view = InfoEmbedView(
+                    message=gen_interaction.message,
+                    user=embed_user,
+                    title="Image generation error!",
+                    description=error_message,
+                    is_error=True,
+                    image_data=None,
+                    notes=error_notes,
+                    full_prompt_url=full_prompt_url,
+                )
+                await error_view.initialize(gen_interaction)
 
-            error_notes = [{"name": "Prompt", "value": display_prompt}]
-            error_view = InfoEmbedView(
-                message=interaction.message,
-                user=embed_user,
-                title="Image generation error!",
-                description=error_message,
-                is_error=True,
-                image_data=None,
-                notes=error_notes,
-                full_prompt_url=full_prompt_url,
-            )
-            await error_view.initialize(interaction)
+        # Show the prompt refinement view first
+        refinement_view = PromptRefinementView(
+            prompt=prompt,
+            user=embed_user,
+            message=interaction.message,
+            on_generate=generate_image_with_prompt,
+        )
+        await refinement_view.initialize(interaction)
 
     @bot.tree.command()  # type: ignore[arg-type]
     @app_commands.describe()
