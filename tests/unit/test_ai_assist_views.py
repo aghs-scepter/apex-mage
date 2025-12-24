@@ -222,10 +222,13 @@ class TestAIAssistResultView:
         assert "X" in button_labels  # Cancel button is labeled "X"
 
     @pytest.mark.asyncio
-    async def test_use_button_calls_on_select_with_refined_prompt(self) -> None:
-        """Test that Use This button calls on_select with refined prompt."""
+    async def test_use_button_shows_preview_view(self) -> None:
+        """Test that Use This button shows EditPromptPreviewView with refined prompt."""
         mock_interaction = MagicMock()
         mock_interaction.user.id = 12345
+        mock_interaction.response.defer = AsyncMock()
+        mock_interaction.response.is_done.return_value = True
+        mock_interaction.edit_original_response = AsyncMock()
         mock_message = MagicMock()
         mock_message.edit = AsyncMock()
         mock_on_select = AsyncMock()
@@ -244,11 +247,31 @@ class TestAIAssistResultView:
             child for child in view.children
             if hasattr(child, "label") and child.label == "Use This"
         )
-        await use_button.callback(mock_interaction)
 
-        mock_on_select.assert_called_once_with(
-            mock_interaction, "Edit", "Reduce brightness by 40%"
-        )
+        with patch(
+            "src.clients.discord.views.carousel.EditPromptPreviewView"
+        ) as mock_preview:
+            mock_preview_instance = MagicMock()
+            mock_preview_instance.initialize = AsyncMock()
+            mock_preview.return_value = mock_preview_instance
+
+            await use_button.callback(mock_interaction)
+
+            # Verify defer was called
+            mock_interaction.response.defer.assert_called_once()
+
+            # Verify preview view was created with correct params
+            mock_preview.assert_called_once()
+            call_kwargs = mock_preview.call_args.kwargs
+            assert call_kwargs["prompt"] == "Reduce brightness by 40%"
+            assert call_kwargs["edit_type"] == "Edit"
+            assert call_kwargs["on_select"] == mock_on_select
+
+            # Verify initialize was called
+            mock_preview_instance.initialize.assert_called_once()
+
+        # on_select should NOT be called directly anymore
+        mock_on_select.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_edit_button_opens_prompt_modal(self) -> None:
