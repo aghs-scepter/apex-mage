@@ -1964,6 +1964,7 @@ class ImageEditResultView(discord.ui.View):
                     False,
                     "Modified Image",
                     str_images,
+                    is_image_only_context=True,
                 )
                 self.added_to_context = True
                 logger.info(
@@ -1992,7 +1993,7 @@ class ImageEditResultView(discord.ui.View):
         if self.embed:
             self.embed.description = (
                 "Image added to context successfully!" + chr(10) +
-                "You can use it for future /prompt and /modify_image commands."
+                "You can use it for future /describe_this and /modify_image commands."
             )
 
         await self.message.edit(embed=self.embed, view=self)
@@ -2269,6 +2270,7 @@ class ImageGenerationResultView(discord.ui.View):
                     False,
                     "Image",
                     str_images,
+                    is_image_only_context=True,
                 )
                 self.added_to_context = True
                 logger.info(
@@ -2298,7 +2300,7 @@ class ImageGenerationResultView(discord.ui.View):
         if self.embed:
             self.embed.description = (
                 "Image added to context successfully!" + chr(10) +
-                "You can use it for future /prompt and /modify_image commands."
+                "You can use it for future /describe_this and /modify_image commands."
             )
 
         if self.message:
@@ -3169,6 +3171,7 @@ class GoogleResultsCarouselView(discord.ui.View):
                     False,
                     "Google Image Search Result",
                     str_images,
+                    is_image_only_context=True,
                 )
 
                 # Track this URL as added
@@ -3346,6 +3349,7 @@ class GoogleResultsCarouselView(discord.ui.View):
                         False,
                         "Google Image Search Result",
                         str_images,
+                        is_image_only_context=True,
                     )
 
                     self.added_urls.add(image_url)
@@ -6159,6 +6163,7 @@ class VariationCarouselView(discord.ui.View):
                     False,
                     "Image Variation",
                     str_images,
+                    is_image_only_context=True,
                 )
                 self.added_to_context = True
                 logger.info(
@@ -6189,7 +6194,7 @@ class VariationCarouselView(discord.ui.View):
             position_label = "original" if self.current_index == 0 else f"variation {self.current_index}"
             self.embed.description = (
                 f"Image ({position_label}) added to context successfully!\n"
-                "You can use it for future /prompt and /modify_image commands."
+                "You can use it for future /describe_this and /modify_image commands."
             )
 
         await self.message.edit(embed=self.embed, view=self)
