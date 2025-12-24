@@ -6286,11 +6286,11 @@ class VariationCarouselView(discord.ui.View):
         parts = []
         for i in range(total):
             if i == self.current_index:
-                # Current position: label with bold brackets
+                # Current position: filled circle with label in bold brackets
                 if i == 0:
-                    parts.append("**[(Original)]**")
+                    parts.append("**[(●)]** Original")
                 else:
-                    parts.append(f"**[({i})]**")
+                    parts.append(f"**[(●)]** {i}")
             else:
                 # Other positions: empty circle
                 parts.append("\u25cb")

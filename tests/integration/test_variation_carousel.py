@@ -201,7 +201,7 @@ class TestVariationCarouselViewInitialization:
 
         indicator = view._generate_position_indicator()
         # E4-T3: Dynamic dots with bold brackets for current position
-        assert "**[(Original)]**" in indicator  # Current position with bold brackets
+        assert "**[(●)]** Original" in indicator  # Current position with filled circle
         # With only original image, no empty circles should appear (dynamic, not padded)
 
     @pytest.mark.asyncio
