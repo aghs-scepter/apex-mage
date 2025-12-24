@@ -93,11 +93,12 @@ def register_image_commands(bot: "DiscordBot") -> None:
                 False,
                 "Uploaded Image",
                 str_images,
+                is_image_only_context=True,
             )
 
             success_message = (
                 "This image was uploaded successfully. "
-                "You can use it for future `/prompt` and `/modify_image` commands."
+                "You can use it for `/describe_this` and `/modify_image` commands."
             )
             success_view = InfoEmbedView(
                 message=interaction.message,
