@@ -327,7 +327,7 @@ class ClearHistoryConfirmationView(discord.ui.View):
         if self.on_select:
             await self.on_select(interaction, self.user, True)
 
-    @discord.ui.button(label="Never Mind", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="X", style=discord.ButtonStyle.danger)
     async def cancel_button(
         self, interaction: discord.Interaction, button: discord.ui.Button["ClearHistoryConfirmationView"]
     ) -> None:
@@ -929,7 +929,7 @@ class ImageCarouselView(discord.ui.View):
                 await self.message.edit(embed=self.embed, attachments=[], view=self)
             await self.on_select(interaction, None)
 
-    @discord.ui.button(label="Describe", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Describe", style=discord.ButtonStyle.primary)
     async def describe_button(
         self, interaction: discord.Interaction, button: discord.ui.Button["ImageCarouselView"]
     ) -> None:
@@ -1143,7 +1143,7 @@ class AIAssistResultView(discord.ui.View):
                 await self.message.edit(view=self)
             await self.on_select(interaction, "Edit", self.refined_prompt)
 
-    @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="Edit", style=discord.ButtonStyle.success, row=0)
     async def edit_button(
         self, interaction: discord.Interaction, button: discord.ui.Button["AIAssistResultView"]
     ) -> None:
@@ -1171,7 +1171,7 @@ class AIAssistResultView(discord.ui.View):
             )
             await interaction.response.send_modal(prompt_modal)
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(label="X", style=discord.ButtonStyle.danger, row=0)
     async def cancel_button(
         self, interaction: discord.Interaction, button: discord.ui.Button["AIAssistResultView"]
     ) -> None:
@@ -1285,7 +1285,7 @@ class AIAssistErrorView(discord.ui.View):
             )
             await interaction.response.send_modal(prompt_modal)
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(label="X", style=discord.ButtonStyle.danger, row=0)
     async def cancel_button(
         self, interaction: discord.Interaction, button: discord.ui.Button["AIAssistErrorView"]
     ) -> None:
@@ -1410,7 +1410,7 @@ class ImageEditTypeView(discord.ui.View):
         self.clear_items()
         logger.debug("buttons_hidden", view="ImageEditTypeView")
 
-    @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="Edit", style=discord.ButtonStyle.success, row=0)
     async def edit_button(
         self, interaction: discord.Interaction, button: discord.ui.Button["ImageEditTypeView"]
     ) -> None:
@@ -1437,7 +1437,7 @@ class ImageEditTypeView(discord.ui.View):
             )
             await interaction.response.send_modal(prompt_modal)
 
-    @discord.ui.button(label="AI Assist", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="AI Assist", style=discord.ButtonStyle.success, row=0)
     async def ai_assist_button(
         self, interaction: discord.Interaction, button: discord.ui.Button["ImageEditTypeView"]
     ) -> None:
@@ -1459,7 +1459,7 @@ class ImageEditTypeView(discord.ui.View):
             )
             await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="Back", style=discord.ButtonStyle.primary, row=0)
     async def back_button(
         self, interaction: discord.Interaction, button: discord.ui.Button["ImageEditTypeView"]
     ) -> None:
@@ -1476,7 +1476,7 @@ class ImageEditTypeView(discord.ui.View):
             self.hide_buttons()
             await self.on_back(interaction)
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(label="X", style=discord.ButtonStyle.danger, row=0)
     async def cancel_button(
         self, interaction: discord.Interaction, button: discord.ui.Button["ImageEditTypeView"]
     ) -> None:
@@ -2059,7 +2059,7 @@ class ImageEditResultView(discord.ui.View):
         )
         await carousel.initialize(interaction)
 
-    @discord.ui.button(label="Describe", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="Describe", style=discord.ButtonStyle.primary, row=0)
     async def describe_button(
         self,
         interaction: discord.Interaction,
@@ -2360,7 +2360,7 @@ class ImageGenerationResultView(discord.ui.View):
         )
         await carousel.initialize(interaction)
 
-    @discord.ui.button(label="Describe", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="Describe", style=discord.ButtonStyle.primary, row=0)
     async def describe_button(
         self,
         interaction: discord.Interaction,
@@ -3423,7 +3423,7 @@ class GoogleResultsCarouselView(discord.ui.View):
         if self.on_edit_image:
             await self.on_edit_image(interaction, current_result, self)
 
-    @discord.ui.button(label="Return", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Back", style=discord.ButtonStyle.primary, row=1)
     async def return_button(
         self,
         interaction: discord.Interaction,
@@ -3456,7 +3456,7 @@ class GoogleResultsCarouselView(discord.ui.View):
         # Stop this view (clears search state)
         self.stop()
 
-    @discord.ui.button(label="Describe", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Describe", style=discord.ButtonStyle.primary, row=1)
     async def describe_button(
         self,
         interaction: discord.Interaction,
@@ -3638,7 +3638,7 @@ class SummarizePreviewView(discord.ui.View):
         if self.on_confirm:
             await self.on_confirm(interaction)
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="X", style=discord.ButtonStyle.danger)
     async def cancel_button(
         self,
         interaction: discord.Interaction,
@@ -4518,7 +4518,7 @@ class DescribeGoogleResultsCarouselView(discord.ui.View):
             if self.message:
                 await self.message.edit(embed=self.embed, view=self)
 
-    @discord.ui.button(label="Return", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Back", style=discord.ButtonStyle.primary)
     async def return_button(
         self,
         interaction: discord.Interaction,
@@ -6194,7 +6194,7 @@ class VariationCarouselView(discord.ui.View):
 
         await self.message.edit(embed=self.embed, view=self)
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger, row=2)
+    @discord.ui.button(label="X", style=discord.ButtonStyle.danger, row=2)
     async def cancel_button(
         self,
         interaction: discord.Interaction,

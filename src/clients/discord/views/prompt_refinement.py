@@ -223,7 +223,7 @@ class PromptRefinementView(discord.ui.View):
         if self.on_generate:
             await self.on_generate(interaction, self.prompt)
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="X", style=discord.ButtonStyle.danger)
     async def cancel_button(
         self,
         interaction: discord.Interaction,
