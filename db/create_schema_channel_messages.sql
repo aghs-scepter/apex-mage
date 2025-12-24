@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS channel_messages(
     visible BOOLEAN DEFAULT TRUE,
     is_image_prompt BOOLEAN DEFAULT FALSE,
     image_b64 TEXT DEFAULT NULL,
+    is_image_only_context BOOLEAN DEFAULT FALSE,
     FOREIGN KEY (channel_id) REFERENCES channels(channel_id),
     FOREIGN KEY (vendor_id) REFERENCES vendors(vendor_id)
 );

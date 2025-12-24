@@ -275,6 +275,9 @@ class MemoryRepository:
             if msg.is_image_prompt:
                 continue
 
+            if msg.is_image_only_context:
+                continue
+
             result.append(msg)
 
         # Sort by timestamp

@@ -124,6 +124,7 @@ class RepositoryAdapter:
         message_type: str,
         is_image_prompt: bool,
         message_data: str,
+        is_image_only_context: bool = False,
     ) -> None:
         """Add a message to the database.
 
@@ -133,6 +134,9 @@ class RepositoryAdapter:
             message_type: Type of message ('prompt', 'assistant', 'behavior').
             is_image_prompt: Whether this is an image generation prompt.
             message_data: The message content.
+            is_image_only_context: Whether this message is for image-only context.
+                When True, excluded from /prompt text context but available for
+                /describe_this and /modify_image commands.
         """
         logger.debug("Adding message to database...")
         vendor_id = await self._get_vendor_id(vendor_name)
@@ -142,6 +146,7 @@ class RepositoryAdapter:
             message_type=message_type,
             content=message_data,
             is_image_prompt=is_image_prompt,
+            is_image_only_context=is_image_only_context,
         )
         await self._repo.save_message(message)
         logger.debug("Message added to database.")
@@ -154,6 +159,7 @@ class RepositoryAdapter:
         is_image_prompt: bool,
         message_data: str,
         message_images: str,
+        is_image_only_context: bool = False,
     ) -> None:
         """Add a message with images to the database.
 
@@ -167,6 +173,9 @@ class RepositoryAdapter:
             is_image_prompt: Whether this is an image generation prompt.
             message_data: The message content.
             message_images: JSON string containing image data.
+            is_image_only_context: Whether this message is for image-only context.
+                When True, excluded from /prompt text context but available for
+                /describe_this and /modify_image commands.
         """
         logger.debug("Adding message with images to database...")
         vendor_id = await self._get_vendor_id(vendor_name)
@@ -176,6 +185,7 @@ class RepositoryAdapter:
             message_type=message_type,
             content=message_data,
             is_image_prompt=is_image_prompt,
+            is_image_only_context=is_image_only_context,
         )
         # Parse the images JSON to extract URLs/data
         image_urls = json.loads(message_images) if message_images else []

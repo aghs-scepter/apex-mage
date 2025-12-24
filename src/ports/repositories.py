@@ -108,6 +108,9 @@ class Message:
         visible: Whether the message is active in the conversation context.
         is_image_prompt: Whether this message is an image generation prompt.
         images: List of images attached to this message.
+        is_image_only_context: Whether this message is for image-only context.
+            When True, the message is excluded from /prompt text context but
+            still available for /describe_this and /modify_image commands.
     """
 
     channel_id: int
@@ -119,6 +122,7 @@ class Message:
     visible: bool = True
     is_image_prompt: bool = False
     images: list[MessageImage] = field(default_factory=list)
+    is_image_only_context: bool = False
 
 
 # =============================================================================

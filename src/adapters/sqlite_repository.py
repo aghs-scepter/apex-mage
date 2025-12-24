@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS channel_messages(
     visible BOOLEAN DEFAULT TRUE,
     is_image_prompt BOOLEAN DEFAULT FALSE,
     image_b64 TEXT DEFAULT NULL,
+    is_image_only_context BOOLEAN DEFAULT FALSE,
     FOREIGN KEY (channel_id) REFERENCES channels(channel_id),
     FOREIGN KEY (vendor_id) REFERENCES vendors(vendor_id)
 );
@@ -191,11 +192,13 @@ INSERT INTO channel_messages(
     vendor_id,
     message_type,
     message_data,
-    is_image_prompt
+    is_image_prompt,
+    is_image_only_context
 )
 SELECT
     (SELECT channel_id FROM channels WHERE discord_id = ?),
     (SELECT vendor_id FROM vendors WHERE vendor_name = ?),
+    ?,
     ?,
     ?,
     ?
@@ -209,11 +212,13 @@ INSERT INTO channel_messages(
     message_type,
     message_data,
     message_images,
-    is_image_prompt
+    is_image_prompt,
+    is_image_only_context
 )
 SELECT
     (SELECT channel_id FROM channels WHERE discord_id = ?),
     (SELECT vendor_id FROM vendors WHERE vendor_name = ?),
+    ?,
     ?,
     ?,
     ?,
@@ -238,6 +243,7 @@ WHERE channels.discord_id = ?
 AND (vendors.vendor_name = ? OR ? = "All Models")
 AND channel_messages.visible = TRUE
 AND channel_messages.is_image_prompt = FALSE
+AND channel_messages.is_image_only_context = FALSE
 ORDER BY channel_messages.message_timestamp ASC
 ;
 """
@@ -259,6 +265,7 @@ WHERE channels.discord_id = ?
 AND (vendors.vendor_name = ? OR ? = "All Models")
 AND channel_messages.visible = TRUE
 AND channel_messages.is_image_prompt = FALSE
+AND channel_messages.is_image_only_context = FALSE
 ORDER BY channel_messages.message_timestamp ASC
 LIMIT ?
 ;
@@ -736,6 +743,7 @@ class SQLiteRepository:
                     message.message_type,
                     message.content,
                     message.is_image_prompt,
+                    message.is_image_only_context,
                 ),
             )
             conn.commit()
@@ -774,6 +782,7 @@ class SQLiteRepository:
                     message.content,
                     images_json,
                     message.is_image_prompt,
+                    message.is_image_only_context,
                 ),
             )
             conn.commit()

@@ -14,5 +14,6 @@ WHERE channels.discord_id = ?
 AND (vendors.vendor_name = ? OR ? = "All Models")
 AND channel_messages.visible = TRUE
 AND channel_messages.is_image_prompt = FALSE
+AND channel_messages.is_image_only_context = FALSE
 ORDER BY channel_messages.message_timestamp ASC
 ;
