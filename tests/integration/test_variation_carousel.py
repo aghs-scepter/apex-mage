@@ -200,10 +200,9 @@ class TestVariationCarouselViewInitialization:
         )
 
         indicator = view._generate_position_indicator()
-        assert "(Original)" in indicator
-        # Should show filled dot for current position plus 3 empty for potential variations
-        assert "\u25cf" in indicator  # Current position (filled)
-        assert "\u25cb" in indicator  # Empty positions
+        # E4-T3: Dynamic dots with bold brackets for current position
+        assert "**[(Original)]**" in indicator  # Current position with bold brackets
+        # With only original image, no empty circles should appear (dynamic, not padded)
 
     @pytest.mark.asyncio
     async def test_view_has_all_required_buttons(self) -> None:
@@ -227,7 +226,7 @@ class TestVariationCarouselViewInitialization:
         assert "Same Prompt" in button_labels
         assert "AI Remix" in button_labels
         assert "Add to Context" in button_labels
-        assert "Cancel" in button_labels
+        assert "X" in button_labels  # Cancel button is now labeled "X"
 
 
 class TestVariationCarouselNavigation:

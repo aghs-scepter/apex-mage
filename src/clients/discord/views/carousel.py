@@ -3427,39 +3427,6 @@ class GoogleResultsCarouselView(discord.ui.View):
         if self.on_edit_image:
             await self.on_edit_image(interaction, current_result, self)
 
-    @discord.ui.button(label="Back", style=discord.ButtonStyle.primary, row=1)
-    async def return_button(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button["GoogleResultsCarouselView"],
-    ) -> None:
-        """Return to the initial embed (ImageSelectionTypeView).
-
-        Calls the on_return callback if provided, then stops this view
-        to clear the search state. Images previously added to context
-        are already persisted in the database and will remain.
-        """
-        if self.user_id != interaction.user.id:
-            await interaction.response.send_message(
-                f"Only the original requester ({self.username}) can use this.",
-                ephemeral=True,
-            )
-            return
-
-        # Call the callback if provided (handles navigation logic)
-        if self.on_return:
-            await self.on_return(interaction, self)
-        else:
-            # Default behavior: just acknowledge
-            await interaction.response.defer()
-            logger.debug(
-                "return_no_callback",
-                view="GoogleResultsCarouselView",
-            )
-
-        # Stop this view (clears search state)
-        self.stop()
-
     @discord.ui.button(label="Describe", style=discord.ButtonStyle.primary, row=1)
     async def describe_button(
         self,
@@ -3530,6 +3497,39 @@ class GoogleResultsCarouselView(discord.ui.View):
             repo=self.repo,
         )
         await description_view.initialize(interaction)
+
+    @discord.ui.button(label="Back", style=discord.ButtonStyle.danger, row=1)
+    async def return_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["GoogleResultsCarouselView"],
+    ) -> None:
+        """Return to the initial embed (ImageSelectionTypeView).
+
+        Calls the on_return callback if provided, then stops this view
+        to clear the search state. Images previously added to context
+        are already persisted in the database and will remain.
+        """
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        # Call the callback if provided (handles navigation logic)
+        if self.on_return:
+            await self.on_return(interaction, self)
+        else:
+            # Default behavior: just acknowledge
+            await interaction.response.defer()
+            logger.debug(
+                "return_no_callback",
+                view="GoogleResultsCarouselView",
+            )
+
+        # Stop this view (clears search state)
+        self.stop()
 
     async def on_timeout(self) -> None:
         """Update the embed on timeout."""
@@ -5341,14 +5341,18 @@ class DescriptionRoutingView(discord.ui.View):
 
 
 class DescriptionDisplayView(discord.ui.View):
-    """View for displaying an image description with edit and accept options.
+    """View for displaying an image description with action buttons.
 
     Shows the Haiku-generated description in an embed with the analyzed image
-    as a thumbnail. Provides buttons to edit the description or accept it as-is.
+    as a thumbnail. Provides buttons to create an image, edit the prompt, or cancel.
 
-    After accepting the description (with or without edits), routing buttons
-    for B4/B5 will be shown (stubbed for now).
+    Button layout: Create Image (green), Edit Prompt (blurple), X (red)
+
+    Edit Prompt allows up to 3 edits total. After the 2nd edit, a warning is shown
+    that only one more edit is allowed.
     """
+
+    MAX_EDITS = 3
 
     def __init__(
         self,
@@ -5360,6 +5364,8 @@ class DescriptionDisplayView(discord.ui.View):
         rate_limiter: "SlidingWindowRateLimiter | None" = None,
         gcs_adapter: "GCSAdapter | None" = None,
         repo: "RepositoryAdapter | None" = None,
+        edit_count: int = 0,
+        initial_description: str | None = None,
     ) -> None:
         """Initialize the description display view.
 
@@ -5372,6 +5378,8 @@ class DescriptionDisplayView(discord.ui.View):
             rate_limiter: Rate limiter for image generation.
             gcs_adapter: GCS adapter for uploading images.
             repo: Repository adapter for storing images to context.
+            edit_count: Number of edits already made (for cycling).
+            initial_description: Pre-existing description (for cycling after edit).
         """
         super().__init__(timeout=USER_INTERACTION_TIMEOUT)
         self.interaction = interaction
@@ -5379,23 +5387,29 @@ class DescriptionDisplayView(discord.ui.View):
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.image_data = image_data
         self.message = message
-        self.description: str = ""
+        self.description: str = initial_description or ""
         self.embed: discord.Embed | None = None
         self._generating = False
         self.image_provider = image_provider
         self.rate_limiter = rate_limiter
         self.gcs_adapter = gcs_adapter
         self.repo = repo
+        self.edit_count = edit_count
 
     async def initialize(self, interaction: discord.Interaction) -> None:
         """Generate description and display the view.
 
-        Calls haiku_describe_image() to generate a description, then displays
-        the result in an embed with edit/accept buttons.
+        Calls haiku_describe_image() to generate a description (if not provided),
+        then displays the result in an embed with action buttons.
 
         Args:
             interaction: The Discord interaction.
         """
+        # If we already have a description (from edit cycling), skip generation
+        if self.description:
+            await self._display_result(interaction)
+            return
+
         self._generating = True
 
         # Create loading embed
@@ -5415,8 +5429,8 @@ class DescriptionDisplayView(discord.ui.View):
         self.embed.set_thumbnail(url=f"attachment://{embed_image.filename}")
 
         # Disable buttons during generation
-        self.edit_button.disabled = True
-        self.use_this_button.disabled = True
+        self.create_image_button.disabled = True
+        self.edit_prompt_button.disabled = True
 
         # Display loading state
         if self.message is not None:
@@ -5487,45 +5501,125 @@ class DescriptionDisplayView(discord.ui.View):
             return
 
         self._generating = False
+        await self._display_result(interaction)
+
+    async def _display_result(self, interaction: discord.Interaction) -> None:
+        """Display the description result with action buttons.
+
+        Args:
+            interaction: The Discord interaction.
+        """
+        # Build description text with optional warning
+        description_text = self.description
+        if self.edit_count == self.MAX_EDITS - 1:
+            # After 2nd edit (edit_count=2), show warning before 3rd edit
+            description_text = (
+                f"{self.description}\n\n"
+                "**You can edit the prompt one more time before further editing is disabled.**"
+            )
 
         # Update embed with description
-        self.embed.title = "Image Description"
-        self.embed.description = self.description
-        self.embed.color = EMBED_COLOR_INFO
+        self.embed = discord.Embed(
+            title="Image Description",
+            description=description_text,
+            color=EMBED_COLOR_INFO,
+        )
+        self.embed.set_author(
+            name=f"{self.username} (via Apex Mage)",
+            url="https://github.com/aghs-scepter/apex-mage",
+            icon_url=self.pfp,
+        )
 
-        # Enable buttons
-        self.edit_button.disabled = False
-        self.use_this_button.disabled = False
+        # Show thumbnail of the analyzed image
+        embed_image = await create_file_from_image(self.image_data)
+        self.embed.set_thumbnail(url=f"attachment://{embed_image.filename}")
+
+        # Enable buttons (disable Edit Prompt if max edits reached)
+        self.create_image_button.disabled = False
+        self.edit_prompt_button.disabled = self.edit_count >= self.MAX_EDITS
 
         # Update the message
         if self.message:
-            embed_image = await create_file_from_image(self.image_data)
             await self.message.edit(
                 embed=self.embed,
                 attachments=[embed_image],
                 view=self,
+            )
+        elif interaction.response.is_done():
+            self.message = await interaction.edit_original_response(
+                embed=self.embed,
+                attachments=[embed_image],
+                view=self,
+            )
+        else:
+            self.message = await interaction.followup.send(
+                embed=self.embed,
+                file=embed_image,
+                view=self,
+                wait=True,
             )
 
     def hide_buttons(self) -> None:
         """Remove all buttons from the view."""
         self.clear_items()
 
-    async def _update_description(
+    async def _handle_edit_submit(
         self, interaction: discord.Interaction, new_description: str
     ) -> None:
-        """Update the displayed description after editing.
+        """Handle edit prompt modal submission - cycle back to same view.
 
         Args:
             interaction: The Discord interaction from the modal.
             new_description: The new description text.
         """
-        self.description = new_description
+        # Increment edit count and cycle back to this view with new description
+        new_edit_count = self.edit_count + 1
 
-        if self.embed:
-            self.embed.description = self.description
+        # Create new view with updated description and edit count
+        new_view = DescriptionDisplayView(
+            interaction=interaction,
+            image_data=self.image_data,
+            user=self.user,
+            message=self.message,
+            image_provider=self.image_provider,
+            rate_limiter=self.rate_limiter,
+            gcs_adapter=self.gcs_adapter,
+            repo=self.repo,
+            edit_count=new_edit_count,
+            initial_description=new_description,
+        )
 
-        # Respond to the modal interaction and update the message
+        # Respond to modal and initialize new view
         await interaction.response.defer()
+        self.stop()
+        await new_view.initialize(interaction)
+
+    async def _generate_image(self, interaction: discord.Interaction) -> None:
+        """Generate an image using the description and show variations carousel.
+
+        Args:
+            interaction: The Discord interaction.
+        """
+        self._generating = True
+        self.hide_buttons()
+
+        # Update embed to show generating state
+        if self.embed:
+            self.embed.title = "Generating Image..."
+            self.embed.description = (
+                "Using description as prompt...\n"
+                "(This may take up to 180 seconds)"
+            )
+            # Add the prompt as a field
+            display_prompt = self.description
+            if len(display_prompt) > 1024:
+                display_prompt = display_prompt[:1021] + "..."
+            self.embed.add_field(
+                name="Prompt",
+                value=display_prompt,
+                inline=False,
+            )
+
         if self.message:
             embed_image = await create_file_from_image(self.image_data)
             await self.message.edit(
@@ -5534,37 +5628,163 @@ class DescriptionDisplayView(discord.ui.View):
                 view=self,
             )
 
-    async def _show_routing_view(
-        self, interaction: discord.Interaction
-    ) -> None:
-        """Show routing buttons to choose what to do with the description.
+        try:
+            # Check rate limit
+            if self.rate_limiter:
+                rate_check = await self.rate_limiter.check(
+                    interaction.user.id, "image"
+                )
+                if not rate_check.allowed:
+                    wait_msg = (
+                        f" Try again in {int(rate_check.wait_seconds)} seconds."
+                        if rate_check.wait_seconds
+                        else ""
+                    )
+                    error_message = (
+                        f"You're requesting too many images and have been "
+                        f"rate-limited. The bot can handle a maximum of "
+                        f"{getenv('FAL_RATE_LIMIT', '8')} image "
+                        f"requests per hour.{wait_msg}"
+                    )
+                    if self.embed:
+                        self.embed.title = "Rate Limited"
+                        self.embed.description = error_message
+                        self.embed.color = EMBED_COLOR_ERROR
+                        self.embed.clear_fields()
+                    if self.message:
+                        embed_image = await create_file_from_image(self.image_data)
+                        await self.message.edit(
+                            embed=self.embed,
+                            attachments=[embed_image],
+                            view=self,
+                        )
+                    self._generating = False
+                    return
 
-        Shows DescriptionRoutingView with options to create a similar image,
-        use as edit prompt, copy text, or cancel.
+            # Generate the image
+            if not self.image_provider:
+                raise RuntimeError("Image provider not initialized")
 
-        Args:
-            interaction: The Discord interaction.
-        """
-        routing_view = DescriptionRoutingView(
-            interaction=interaction,
-            description=self.description,
-            reference_image_data=self.image_data,
-            user=self.user,
-            message=self.message,
-            image_provider=self.image_provider,
-            rate_limiter=self.rate_limiter,
-            gcs_adapter=self.gcs_adapter,
-            repo=self.repo,
-        )
-        await routing_view.initialize(interaction)
+            # Store the prompt in repo if available
+            if self.repo and interaction.channel_id:
+                await self.repo.create_channel(interaction.channel_id)
+                await self.repo.add_message(
+                    interaction.channel_id, "Fal.AI", "prompt", True, self.description
+                )
 
-    @discord.ui.button(label="Edit Description", style=discord.ButtonStyle.secondary)
-    async def edit_button(
+            async with asyncio.timeout(API_TIMEOUT_SECONDS):
+                generated_images = await self.image_provider.generate(
+                    ImageRequest(prompt=self.description)
+                )
+            generated_image = generated_images[0]
+
+            if generated_image.url is None:
+                raise ValueError("Generated image has no URL")
+
+            image_b64 = image_strip_headers(generated_image.url, "jpeg")
+            image_b64 = await asyncio.to_thread(compress_image, image_b64)
+
+            # Record the request after successful operation
+            if self.rate_limiter:
+                await self.rate_limiter.record(interaction.user.id, "image")
+
+            has_nsfw = generated_image.has_nsfw_content or False
+            output_filename = "image.jpeg"
+            if has_nsfw:
+                output_filename = "SPOILER_image.jpeg"
+
+            self._generating = False
+
+            # Show VariationCarouselView with the generated image
+            if self.message is None:
+                raise RuntimeError("Message is None")
+
+            carousel_view = VariationCarouselView(
+                interaction=interaction,
+                message=self.message,
+                user=self.user,
+                original_image={
+                    "filename": output_filename,
+                    "image": image_b64,
+                },
+                prompt=self.description,
+                repo=self.repo,
+                image_provider=self.image_provider,
+                rate_limiter=self.rate_limiter,
+            )
+            self.stop()
+            await carousel_view.initialize(interaction)
+
+        except TimeoutError:
+            logger.error("image_generation_timeout", timeout_seconds=API_TIMEOUT_SECONDS)
+            if self.embed:
+                self.embed.title = "Generation Timed Out"
+                self.embed.description = (
+                    "Image generation timed out after 180 seconds. "
+                    "Please try again."
+                )
+                self.embed.color = EMBED_COLOR_ERROR
+                self.embed.clear_fields()
+            if self.message:
+                embed_image = await create_file_from_image(self.image_data)
+                await self.message.edit(
+                    embed=self.embed,
+                    attachments=[embed_image],
+                    view=self,
+                )
+            self._generating = False
+
+        except Exception as ex:
+            logger.error(
+                "image_generation_error",
+                view="DescriptionDisplayView",
+                error=str(ex),
+            )
+            if self.embed:
+                self.embed.title = "Generation Failed"
+                self.embed.description = f"An error occurred: {ex}"
+                self.embed.color = EMBED_COLOR_ERROR
+                self.embed.clear_fields()
+            if self.message:
+                embed_image = await create_file_from_image(self.image_data)
+                await self.message.edit(
+                    embed=self.embed,
+                    attachments=[embed_image],
+                    view=self,
+                )
+            self._generating = False
+
+    @discord.ui.button(label="Create Image", style=discord.ButtonStyle.success, row=0)
+    async def create_image_button(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button["DescriptionDisplayView"],
     ) -> None:
-        """Open modal to edit the description."""
+        """Generate an image using the description as prompt."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        if self._generating:
+            await interaction.response.send_message(
+                "Please wait for the current operation to complete.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+        await self._generate_image(interaction)
+
+    @discord.ui.button(label="Edit Prompt", style=discord.ButtonStyle.primary, row=0)
+    async def edit_prompt_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["DescriptionDisplayView"],
+    ) -> None:
+        """Open modal to edit the prompt, then cycle back to same view."""
         if self.user_id != interaction.user.id:
             await interaction.response.send_message(
                 f"Only the original requester ({self.username}) can edit this.",
@@ -5579,38 +5799,20 @@ class DescriptionDisplayView(discord.ui.View):
             )
             return
 
+        if self.edit_count >= self.MAX_EDITS:
+            await interaction.response.send_message(
+                "Maximum number of edits reached.",
+                ephemeral=True,
+            )
+            return
+
         modal = DescriptionEditModal(
             current_description=self.description,
-            on_submit=self._update_description,
+            on_submit=self._handle_edit_submit,
         )
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="Use This", style=discord.ButtonStyle.success)
-    async def use_this_button(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button["DescriptionDisplayView"],
-    ) -> None:
-        """Accept the description and show routing options."""
-        if self.user_id != interaction.user.id:
-            await interaction.response.send_message(
-                f"Only the original requester ({self.username}) can use this.",
-                ephemeral=True,
-            )
-            return
-
-        if self._generating:
-            await interaction.response.send_message(
-                "Please wait for the description to finish generating.",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.response.defer()
-        await self._show_routing_view(interaction)
-        self.stop()
-
-    @discord.ui.button(label="X", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="X", style=discord.ButtonStyle.danger, row=0)
     async def cancel_button(
         self,
         interaction: discord.Interaction,
@@ -5724,29 +5926,31 @@ class VariationCarouselView(discord.ui.View):
     def _generate_position_indicator(self) -> str:
         """Generate a visual position indicator for the carousel.
 
+        Dynamic dots matching actual image count (E4-T3):
+        - Uses filled circle for current position
+        - Uses empty circles for other positions
+        - Bold brackets around the current selection
+
         Returns:
-            Position indicator string like "(Original) * o o o" or "(1) * o...".
+            Position indicator string like "**[(Original)]**" or "o **[(1)]**".
         """
         all_images = self._get_all_images()
         total = len(all_images)
 
-        # Label for current position
-        if self.current_index == 0:
-            label = "(Original)"
-        else:
-            label = f"({self.current_index})"
-
-        # Build position dots
-        dots = ""
+        # Build position dots dynamically (only for actual images)
+        parts = []
         for i in range(total):
-            dots += "\u25cf" if i == self.current_index else "\u25cb"
+            if i == self.current_index:
+                # Current position: label with bold brackets
+                if i == 0:
+                    parts.append("**[(Original)]**")
+                else:
+                    parts.append(f"**[({i})]**")
+            else:
+                # Other positions: empty circle
+                parts.append("\u25cb")
 
-        # Pad remaining slots if not at max
-        remaining = (self.MAX_VARIATIONS + 1) - total
-        for _ in range(remaining):
-            dots += "\u25cb"
-
-        return f"{label} {dots}"
+        return " ".join(parts)
 
     async def initialize(self, interaction: discord.Interaction) -> None:
         """Create and display the carousel embed."""
@@ -6184,10 +6388,9 @@ class VariationCarouselView(discord.ui.View):
                 await self.message.edit(embed=self.embed, view=self)
                 return
 
-        # Update button to show success
-        button.label = "Added to Context"
-        button.disabled = True
-        button.style = discord.ButtonStyle.secondary
+        # E4-T4: Remove ALL buttons after Add to Context
+        self._hide_buttons()
+        self.stop()
 
         # Update embed description
         if self.embed:

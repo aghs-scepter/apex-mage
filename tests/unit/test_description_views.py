@@ -142,13 +142,13 @@ class TestDescriptionDisplayView:
 
         # Get button labels
         button_labels = [item.label for item in view.children if hasattr(item, "label")]
-        assert "Edit Description" in button_labels
-        assert "Use This" in button_labels
+        assert "Edit Prompt" in button_labels
+        assert "Create Image" in button_labels
         assert "X" in button_labels
 
     @pytest.mark.asyncio
-    async def test_edit_button_rejects_wrong_user(self) -> None:
-        """Test that edit button rejects interactions from wrong user."""
+    async def test_edit_prompt_button_rejects_wrong_user(self) -> None:
+        """Test that edit prompt button rejects interactions from wrong user."""
         mock_interaction = MagicMock()
         mock_interaction.user.id = 99999  # Different from user_id 12345
         mock_interaction.response.send_message = AsyncMock()
@@ -160,7 +160,7 @@ class TestDescriptionDisplayView:
             message=None,
         )
 
-        await view.edit_button.callback(mock_interaction)
+        await view.edit_prompt_button.callback(mock_interaction)
 
         mock_interaction.response.send_message.assert_called_once()
         call_args = mock_interaction.response.send_message.call_args
@@ -168,8 +168,8 @@ class TestDescriptionDisplayView:
         assert call_args[1]["ephemeral"] is True
 
     @pytest.mark.asyncio
-    async def test_use_this_button_rejects_wrong_user(self) -> None:
-        """Test that use this button rejects interactions from wrong user."""
+    async def test_create_image_button_rejects_wrong_user(self) -> None:
+        """Test that create image button rejects interactions from wrong user."""
         mock_interaction = MagicMock()
         mock_interaction.user.id = 99999  # Different from user_id 12345
         mock_interaction.response.send_message = AsyncMock()
@@ -181,7 +181,7 @@ class TestDescriptionDisplayView:
             message=None,
         )
 
-        await view.use_this_button.callback(mock_interaction)
+        await view.create_image_button.callback(mock_interaction)
 
         mock_interaction.response.send_message.assert_called_once()
         call_args = mock_interaction.response.send_message.call_args
@@ -210,8 +210,8 @@ class TestDescriptionDisplayView:
         assert call_args[1]["ephemeral"] is True
 
     @pytest.mark.asyncio
-    async def test_edit_button_opens_modal(self) -> None:
-        """Test that edit button opens the description edit modal."""
+    async def test_edit_prompt_button_opens_modal(self) -> None:
+        """Test that edit prompt button opens the description edit modal."""
         mock_interaction = MagicMock()
         mock_interaction.user.id = 12345  # Same as user_id
         mock_interaction.response.send_modal = AsyncMock()
@@ -225,15 +225,15 @@ class TestDescriptionDisplayView:
         view.description = "Test description to edit"
         view._generating = False
 
-        await view.edit_button.callback(mock_interaction)
+        await view.edit_prompt_button.callback(mock_interaction)
 
         mock_interaction.response.send_modal.assert_called_once()
         modal = mock_interaction.response.send_modal.call_args[0][0]
         assert isinstance(modal, DescriptionEditModal)
 
     @pytest.mark.asyncio
-    async def test_edit_button_blocked_during_generation(self) -> None:
-        """Test that edit button is blocked during description generation."""
+    async def test_edit_prompt_button_blocked_during_generation(self) -> None:
+        """Test that edit prompt button is blocked during generation."""
         mock_interaction = MagicMock()
         mock_interaction.user.id = 12345  # Same as user_id
         mock_interaction.response.send_message = AsyncMock()
@@ -246,7 +246,7 @@ class TestDescriptionDisplayView:
         )
         view._generating = True  # Simulating generation in progress
 
-        await view.edit_button.callback(mock_interaction)
+        await view.edit_prompt_button.callback(mock_interaction)
 
         mock_interaction.response.send_message.assert_called_once()
         call_args = mock_interaction.response.send_message.call_args
@@ -254,8 +254,8 @@ class TestDescriptionDisplayView:
         assert call_args[1]["ephemeral"] is True
 
     @pytest.mark.asyncio
-    async def test_use_this_button_blocked_during_generation(self) -> None:
-        """Test that use this button is blocked during description generation."""
+    async def test_create_image_button_blocked_during_generation(self) -> None:
+        """Test that create image button is blocked during generation."""
         mock_interaction = MagicMock()
         mock_interaction.user.id = 12345  # Same as user_id
         mock_interaction.response.send_message = AsyncMock()
@@ -268,11 +268,11 @@ class TestDescriptionDisplayView:
         )
         view._generating = True  # Simulating generation in progress
 
-        await view.use_this_button.callback(mock_interaction)
+        await view.create_image_button.callback(mock_interaction)
 
         mock_interaction.response.send_message.assert_called_once()
         call_args = mock_interaction.response.send_message.call_args
-        assert "wait for the description to finish" in call_args[0][0]
+        assert "wait for the current operation to complete" in call_args[0][0]
         assert call_args[1]["ephemeral"] is True
 
     @pytest.mark.asyncio
@@ -342,8 +342,8 @@ class TestDescriptionDisplayView:
             assert "Failed to describe image" in str(view.embed.description)
 
     @pytest.mark.asyncio
-    async def test_update_description_updates_embed(self) -> None:
-        """Test that _update_description updates the embed and message."""
+    async def test_handle_edit_submit_creates_new_view(self) -> None:
+        """Test that _handle_edit_submit creates a new view with incremented edit count."""
         mock_interaction = MagicMock()
         mock_interaction.response.defer = AsyncMock()
         mock_message = MagicMock()
@@ -354,18 +354,17 @@ class TestDescriptionDisplayView:
             image_data=create_mock_image_data(),
             user=create_mock_user(),
             message=mock_message,
+            edit_count=0,
         )
-        view.embed = MagicMock()
 
         with patch(
             "src.clients.discord.views.carousel.create_file_from_image",
             new_callable=AsyncMock,
         ):
-            await view._update_description(mock_interaction, "New edited description")
+            await view._handle_edit_submit(mock_interaction, "New edited description")
 
-        assert view.description == "New edited description"
-        assert view.embed.description == "New edited description"
-        mock_message.edit.assert_called_once()
+        # Verify the view was stopped
+        assert view.is_finished()
 
     @pytest.mark.asyncio
     async def test_cancel_button_updates_embed_and_stops_view(self) -> None:

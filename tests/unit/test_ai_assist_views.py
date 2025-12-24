@@ -219,7 +219,7 @@ class TestAIAssistResultView:
         ]
         assert "Use This" in button_labels
         assert "Edit" in button_labels
-        assert "Cancel" in button_labels
+        assert "X" in button_labels  # Cancel button is labeled "X"
 
     @pytest.mark.asyncio
     async def test_use_button_calls_on_select_with_refined_prompt(self) -> None:
@@ -300,7 +300,7 @@ class TestAIAssistResultView:
         # Find and call the cancel button
         cancel_button = next(
             child for child in view.children
-            if hasattr(child, "label") and child.label == "Cancel"
+            if hasattr(child, "label") and child.label == "X"
         )
         await cancel_button.callback(mock_interaction)
 
@@ -371,7 +371,7 @@ class TestAIAssistErrorView:
             if hasattr(child, "label")
         ]
         assert "Enter Manually" in button_labels
-        assert "Cancel" in button_labels
+        assert "X" in button_labels  # Cancel button is labeled "X"
 
     @pytest.mark.asyncio
     async def test_enter_manually_opens_modal_with_prefilled_text(self) -> None:
@@ -422,8 +422,8 @@ class TestImageEditTypeViewAIAssistButton:
         assert "AI Assist" in button_labels
 
     @pytest.mark.asyncio
-    async def test_ai_assist_button_is_secondary_style(self) -> None:
-        """Test that AI Assist button uses secondary (gray) style."""
+    async def test_ai_assist_button_is_success_style(self) -> None:
+        """Test that AI Assist button uses success (green) style."""
         import discord
 
         view = ImageEditTypeView(
@@ -436,7 +436,7 @@ class TestImageEditTypeViewAIAssistButton:
             child for child in view.children
             if hasattr(child, "label") and child.label == "AI Assist"
         )
-        assert ai_assist_button.style == discord.ButtonStyle.secondary
+        assert ai_assist_button.style == discord.ButtonStyle.success
 
     @pytest.mark.asyncio
     async def test_ai_assist_button_opens_modal(self) -> None:

@@ -543,6 +543,7 @@ def register_image_commands(bot: "DiscordBot") -> None:
 
         # If an image was attached directly, process it
         if image is not None:
+            channel_id = interaction.channel_id
             file_extension = image.filename.split(".")[-1].lower()
             if file_extension in ["png", "jpg", "jpeg"]:
                 file_data = await image.read()
@@ -553,6 +554,20 @@ def register_image_commands(bot: "DiscordBot") -> None:
                 new_filename = f"{filename_without_ext}.jpeg"
 
                 image_data = {"filename": new_filename, "image": image_b64}
+
+                # Add the uploaded image to context with is_image_only_context=True
+                images = [image_data]
+                str_images = json.dumps(images)
+                await bot.repo.create_channel(channel_id)
+                await bot.repo.add_message_with_images(
+                    channel_id,
+                    "Anthropic",
+                    "prompt",
+                    False,
+                    "Uploaded Image",
+                    str_images,
+                    is_image_only_context=True,
+                )
 
                 # Call the callback with the uploaded image
                 await on_image_selected(interaction, image_data)

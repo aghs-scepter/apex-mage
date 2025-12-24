@@ -134,9 +134,15 @@ class PromptRefinementView(discord.ui.View):
         await interaction.response.defer()
         self.stop()
 
-        # Show processing state
+        # Show processing state with original prompt (E4-T2)
+        display_prompt = self.prompt
+        if len(display_prompt) > 500:
+            display_prompt = display_prompt[:497] + "..."
         if self.embed:
-            self.embed.description = "Refining your prompt with AI..."
+            self.embed.description = (
+                f"Refining your prompt with AI...\n\n"
+                f"**Original prompt:**\n```\n{display_prompt}\n```"
+            )
         self.hide_buttons()
         if self.message:
             await self.message.edit(embed=self.embed, view=self)
@@ -509,6 +515,31 @@ class PromptComparisonView(discord.ui.View):
 
         if self.on_generate:
             await self.on_generate(interaction, self.original_prompt)
+
+    @discord.ui.button(label="X", style=discord.ButtonStyle.danger)
+    async def cancel_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["PromptComparisonView"],
+    ) -> None:
+        """Cancel the operation."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+        self.stop()
+        self.hide_buttons()
+
+        if self.embed:
+            self.embed.title = "Cancelled"
+            self.embed.description = "Image generation was cancelled."
+            self.embed.clear_fields()
+        if self.message:
+            await self.message.edit(embed=self.embed, view=self)
 
     async def on_timeout(self) -> None:
         """Handle view timeout."""
