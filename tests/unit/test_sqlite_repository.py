@@ -459,6 +459,119 @@ class TestMessageRepository:
         messages_after = await repo.get_visible_messages(12345, "Anthropic")
         assert len(messages_after) == 0
 
+    async def test_is_image_only_context_excludes_from_visible(
+        self, repo_with_channel_and_vendor: SQLiteRepository
+    ) -> None:
+        """Test that messages with is_image_only_context=True are excluded from get_visible_messages."""
+        repo = repo_with_channel_and_vendor
+        vendor = await repo.get_vendor("Anthropic")
+        assert vendor is not None
+
+        # Save a regular message
+        regular_msg = Message(
+            channel_id=12345,
+            vendor_id=vendor.id,
+            message_type="prompt",
+            content="Regular message",
+            is_image_only_context=False,
+        )
+        await repo.save_message(regular_msg)
+
+        # Save an image-only context message
+        image_only_msg = Message(
+            channel_id=12345,
+            vendor_id=vendor.id,
+            message_type="prompt",
+            content="Image only context",
+            is_image_only_context=True,
+        )
+        await repo.save_message(image_only_msg)
+
+        # get_visible_messages should only return the regular message
+        messages = await repo.get_visible_messages(12345, "Anthropic")
+        assert len(messages) == 1
+        assert messages[0].content == "Regular message"
+
+    async def test_is_image_only_context_excludes_from_latest(
+        self, repo_with_channel_and_vendor: SQLiteRepository
+    ) -> None:
+        """Test that messages with is_image_only_context=True are excluded from get_latest_messages."""
+        repo = repo_with_channel_and_vendor
+        vendor = await repo.get_vendor("Anthropic")
+        assert vendor is not None
+
+        # Save 3 regular messages
+        for i in range(3):
+            msg = Message(
+                channel_id=12345,
+                vendor_id=vendor.id,
+                message_type="prompt",
+                content=f"Regular {i}",
+                is_image_only_context=False,
+            )
+            await repo.save_message(msg)
+
+        # Save 2 image-only context messages
+        for i in range(2):
+            msg = Message(
+                channel_id=12345,
+                vendor_id=vendor.id,
+                message_type="prompt",
+                content=f"Image only {i}",
+                is_image_only_context=True,
+            )
+            await repo.save_message(msg)
+
+        # get_latest_messages should only return the regular messages
+        messages = await repo.get_latest_messages(12345, "Anthropic", limit=10)
+        assert len(messages) == 3
+        for msg in messages:
+            assert "Regular" in msg.content
+
+    async def test_is_image_only_context_with_images(
+        self, repo_with_channel_and_vendor: SQLiteRepository
+    ) -> None:
+        """Test that is_image_only_context works correctly with save_message_with_images."""
+        repo = repo_with_channel_and_vendor
+        vendor = await repo.get_vendor("Anthropic")
+        assert vendor is not None
+
+        # Save a regular message with images
+        regular_msg = Message(
+            channel_id=12345,
+            vendor_id=vendor.id,
+            message_type="prompt",
+            content="Regular with image",
+            is_image_only_context=False,
+        )
+        await repo.save_message_with_images(
+            regular_msg, ["https://example.com/regular.png"]
+        )
+
+        # Save an image-only context message with images
+        image_only_msg = Message(
+            channel_id=12345,
+            vendor_id=vendor.id,
+            message_type="prompt",
+            content="Image only with image",
+            is_image_only_context=True,
+        )
+        await repo.save_message_with_images(
+            image_only_msg, ["https://example.com/imageonly.png"]
+        )
+
+        # get_visible_messages should only return the regular message
+        messages = await repo.get_visible_messages(12345, "Anthropic")
+        assert len(messages) == 1
+        assert messages[0].content == "Regular with image"
+        assert len(messages[0].images) == 1
+
+        # get_latest_images should return both (they both have images, visibility filters apply)
+        images = await repo.get_latest_images(12345, "Anthropic", limit=10)
+        # Only 1 because is_image_only_context=True still has visible=TRUE,
+        # but the query filters on is_image_prompt=FALSE which both are
+        assert len(images) == 2
+
 
 # =============================================================================
 # RateLimitRepository Tests
