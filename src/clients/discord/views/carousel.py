@@ -158,16 +158,6 @@ class InfoEmbedView(discord.ui.View):
                 )
             )
 
-        # Add download image button if URL is provided
-        if self.download_url:
-            self.add_item(
-                discord.ui.Button(
-                    label="Download Image",
-                    url=self.download_url,
-                    style=discord.ButtonStyle.link,
-                )
-            )
-
         if self.image_data:
             embed_image = await create_file_from_image(self.image_data)
             self.embed.set_image(url=f"attachment://{embed_image.filename}")
@@ -316,7 +306,7 @@ class ClearHistoryConfirmationView(discord.ui.View):
         """Remove all buttons from the view."""
         self.clear_items()
 
-    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.success)
     async def confirm_button(
         self, interaction: discord.Interaction, button: discord.ui.Button["ClearHistoryConfirmationView"]
     ) -> None:
@@ -2243,17 +2233,6 @@ class ImageEditResultView(discord.ui.View):
         source_label = f"Source: {num_sources} image{plural_s}"
         self.embed.set_footer(text=source_label)
 
-        # Add download button if URL is provided
-        if self.download_url:
-            self.add_item(
-                discord.ui.Button(
-                    label="Download",
-                    url=self.download_url,
-                    style=discord.ButtonStyle.link,
-                    row=1,
-                )
-            )
-
         await self.message.edit(
             embed=self.embed,
             attachments=[result_file, source_file],
@@ -2522,17 +2501,6 @@ class ImageGenerationResultView(discord.ui.View):
         # Create the result image file
         result_file = await create_file_from_image(self.image_data)
         self.embed.set_image(url=f"attachment://{result_file.filename}")
-
-        # Add download button if URL is provided (link button, row 1)
-        if self.download_url:
-            self.add_item(
-                discord.ui.Button(
-                    label="Download",
-                    url=self.download_url,
-                    style=discord.ButtonStyle.link,
-                    row=1,
-                )
-            )
 
         # Add view full prompt button if URL is provided (link button, row 1)
         if self.full_prompt_url:
