@@ -2600,10 +2600,9 @@ class ImageGenerationResultView(discord.ui.View):
                     await self.message.edit(embed=self.embed, view=self)
                 return
 
-        # Update button to show success
-        button.label = "Added to Context"
-        button.disabled = True
-        button.style = discord.ButtonStyle.secondary
+        # Remove ALL buttons and stop view
+        self.clear_items()
+        self.stop()
 
         # Update embed description
         if self.embed:
