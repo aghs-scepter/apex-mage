@@ -1040,6 +1040,7 @@ class AIAssistModal(discord.ui.Modal, title="AI Assist - Describe Your Edit"):
             on_select=self.on_select,
         )
         await preview_view.initialize(interaction)
+
     async def on_error(  # type: ignore[override]
         self, interaction: discord.Interaction, error: Exception
     ) -> None:

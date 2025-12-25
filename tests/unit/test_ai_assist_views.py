@@ -75,10 +75,14 @@ class TestAIAssistModal:
         """Test that on_submit calls haiku_complete with correct args."""
         mock_interaction = MagicMock()
         mock_interaction.response.defer = AsyncMock()
+        mock_interaction.response.is_done.return_value = True
+        mock_interaction.edit_original_response = AsyncMock()
         mock_message = MagicMock()
         mock_message.edit = AsyncMock()
 
         mock_on_select = AsyncMock()
+        mock_file = MagicMock()
+        mock_file.filename = "test.jpg"
 
         modal = AIAssistModal(
             image_data=create_mock_image_data(),
@@ -93,19 +97,28 @@ class TestAIAssistModal:
             new_callable=AsyncMock,
             return_value="Reduce brightness by 40%, increase contrast",
         ) as mock_haiku:
-            await modal.on_submit(mock_interaction)
+            with patch(
+                "src.clients.discord.views.carousel.create_file_from_image",
+                new_callable=AsyncMock,
+                return_value=mock_file,
+            ):
+                await modal.on_submit(mock_interaction)
 
-            mock_haiku.assert_called_once()
-            call_kwargs = mock_haiku.call_args.kwargs
-            assert call_kwargs["user_message"] == "make it darker"
+                mock_haiku.assert_called_once()
+                call_kwargs = mock_haiku.call_args.kwargs
+                assert call_kwargs["user_message"] == "make it darker"
 
     @pytest.mark.asyncio
-    async def test_on_submit_shows_result_view_on_success(self) -> None:
-        """Test that on_submit shows AIAssistResultView on success."""
+    async def test_on_submit_shows_edit_preview_on_success(self) -> None:
+        """Test that on_submit shows EditPromptPreviewView on success."""
         mock_interaction = MagicMock()
         mock_interaction.response.defer = AsyncMock()
+        mock_interaction.response.is_done.return_value = True
+        mock_interaction.edit_original_response = AsyncMock()
         mock_message = MagicMock()
         mock_message.edit = AsyncMock()
+        mock_file = MagicMock()
+        mock_file.filename = "test.jpg"
 
         modal = AIAssistModal(
             image_data=create_mock_image_data(),
@@ -120,18 +133,27 @@ class TestAIAssistModal:
             new_callable=AsyncMock,
             return_value="Reduce brightness by 40%",
         ):
-            await modal.on_submit(mock_interaction)
+            with patch(
+                "src.clients.discord.views.carousel.create_file_from_image",
+                new_callable=AsyncMock,
+                return_value=mock_file,
+            ):
+                await modal.on_submit(mock_interaction)
 
-            # The message.edit should be called with the result view
-            mock_message.edit.assert_called()
+                # The message.edit should be called with EditPromptPreviewView
+                mock_message.edit.assert_called()
 
     @pytest.mark.asyncio
     async def test_on_submit_retries_on_failure(self) -> None:
         """Test that on_submit retries once on Haiku failure."""
         mock_interaction = MagicMock()
         mock_interaction.response.defer = AsyncMock()
+        mock_interaction.response.is_done.return_value = True
+        mock_interaction.edit_original_response = AsyncMock()
         mock_message = MagicMock()
         mock_message.edit = AsyncMock()
+        mock_file = MagicMock()
+        mock_file.filename = "test.jpg"
 
         modal = AIAssistModal(
             image_data=create_mock_image_data(),
@@ -151,7 +173,12 @@ class TestAIAssistModal:
             ],
         ) as mock_haiku:
             with patch("asyncio.sleep", new_callable=AsyncMock):
-                await modal.on_submit(mock_interaction)
+                with patch(
+                    "src.clients.discord.views.carousel.create_file_from_image",
+                    new_callable=AsyncMock,
+                    return_value=mock_file,
+                ):
+                    await modal.on_submit(mock_interaction)
 
             assert mock_haiku.call_count == 2
 
