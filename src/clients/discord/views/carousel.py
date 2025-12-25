@@ -974,11 +974,7 @@ class AIAssistModal(discord.ui.Modal, title="AI Assist - Describe Your Edit"):
         self.description: discord.ui.TextInput[AIAssistModal] = discord.ui.TextInput(
             label="Describe what changes you want:",
             style=discord.TextStyle.paragraph,
-            placeholder=(
-                "Enter a rough description of the edit you want "
-                "(e.g., 'make it darker', 'add a sunset background'). "
-                "AI will help refine this into a detailed prompt."
-            ),
+            placeholder="Describe your desired changes (e.g., 'darker', 'sunset background')",
             required=True,
             max_length=500,
         )
