@@ -28,7 +28,20 @@ logger = get_logger(__name__)
 API_TIMEOUT_SECONDS = 180
 
 # System prompt for remixing image prompts
-REMIX_SYSTEM_PROMPT = """Slightly modify this image generation prompt while preserving its artistic style and core subject. Make one small creative change (lighting, angle, detail, or mood). Keep the same overall aesthetic.
+REMIX_SYSTEM_PROMPT = """Create a variation of this image generation prompt following these rules:
+
+MUST PRESERVE (copy exactly):
+- Any text, words, letters, or quotes that appear in the prompt
+- The core subject/theme (main character, object, or scene)
+- The overall artistic style and aesthetic
+
+ALLOWED CHANGES (pick one small variation):
+- Lighting (time of day, shadows, glow)
+- Camera angle or perspective
+- Minor details (colors, textures, background elements)
+- Mood or atmosphere
+
+IMPORTANT: If the original prompt contains specific text (like words on a sign, title text, or spoken words), you MUST include that exact text in your output.
 
 Your response should ONLY be the modified prompt, with no additional text, explanation, or formatting."""
 
