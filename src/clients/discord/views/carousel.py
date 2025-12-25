@@ -1029,17 +1029,17 @@ class AIAssistModal(discord.ui.Modal, title="AI Assist - Describe Your Edit"):
             await error_view.initialize(interaction)
             return
 
-        # Show the result view with refined prompt
-        result_view = AIAssistResultView(
+        # Show the edit preview directly with refined prompt
+        preview_view = EditPromptPreviewView(
+            interaction=interaction,
             image_data=self.image_data,
+            edit_type="AI Assist",
+            prompt=refined_prompt,
             user=self.user,
             message=self.message,
-            rough_description=rough_description,
-            refined_prompt=refined_prompt,
             on_select=self.on_select,
         )
-        await result_view.initialize(interaction)
-
+        await preview_view.initialize(interaction)
     async def on_error(  # type: ignore[override]
         self, interaction: discord.Interaction, error: Exception
     ) -> None:
@@ -1103,8 +1103,12 @@ class AIAssistResultView(discord.ui.View):
             inline=False,
         )
 
+        # Add image to embed as main image (not thumbnail)
+        embed_image = await create_file_from_image(self.image_data)
+        self.embed.set_image(url=f"attachment://{embed_image.filename}")
+
         if self.message:
-            await self.message.edit(embed=self.embed, view=self)
+            await self.message.edit(embed=self.embed, view=self, attachments=[embed_image])
 
     def hide_buttons(self) -> None:
         """Remove all buttons from the view."""
@@ -1963,6 +1967,17 @@ class ImageEditPerformView(discord.ui.View):
             url="https://github.com/aghs-scepter/apex-mage",
             icon_url=self.pfp,
         )
+
+        # Show edit prompt in processing embed (skip placeholder)
+        if self.prompt and self.prompt != "`placeholder`":
+            display_prompt = self.prompt
+            if len(display_prompt) > 1024:
+                display_prompt = display_prompt[:1021] + "..."
+            self.embed.add_field(
+                name="Edit Prompt",
+                value=display_prompt,
+                inline=False,
+            )
 
         # Create thumbnail: composite for 2+ images, single for 1 image
         if num_images > 1:
