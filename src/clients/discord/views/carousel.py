@@ -6003,15 +6003,15 @@ class DescriptionDisplayView(discord.ui.View):
 
             self._generating = False
 
-            # Show VariationCarouselView with the generated image
+            # Show ImageGenerationResultView with standard buttons
             if self.message is None:
                 raise RuntimeError("Message is None")
 
-            carousel_view = VariationCarouselView(
+            result_view = ImageGenerationResultView(
                 interaction=interaction,
                 message=self.message,
                 user=self.user,
-                original_image={
+                image_data={
                     "filename": output_filename,
                     "image": image_b64,
                 },
@@ -6019,9 +6019,10 @@ class DescriptionDisplayView(discord.ui.View):
                 repo=self.repo,
                 image_provider=self.image_provider,
                 rate_limiter=self.rate_limiter,
+                gcs_adapter=self.gcs_adapter,
             )
             self.stop()
-            await carousel_view.initialize(interaction)
+            await result_view.initialize(interaction)
 
         except TimeoutError:
             logger.error("image_generation_timeout", timeout_seconds=API_TIMEOUT_SECONDS)
