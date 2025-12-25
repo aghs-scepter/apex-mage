@@ -221,6 +221,9 @@ class PromptRefinementView(discord.ui.View):
             )
             return
 
+        # Defer the interaction before long-running image generation
+        await interaction.response.defer()
+
         self.stop()
         self.hide_buttons()
         if self.message:
@@ -305,6 +308,9 @@ class PromptRefinementFallbackView(discord.ui.View):
                 ephemeral=True,
             )
             return
+
+        # Defer the interaction before long-running image generation
+        await interaction.response.defer()
 
         self.stop()
         self.hide_buttons()
@@ -454,6 +460,9 @@ class PromptComparisonView(discord.ui.View):
             )
             return
 
+        # Defer the interaction before long-running image generation
+        await interaction.response.defer()
+
         self.stop()
         self.hide_buttons()
         if self.message:
@@ -480,6 +489,9 @@ class PromptComparisonView(discord.ui.View):
             modal_interaction: discord.Interaction, edited_prompt: str
         ) -> None:
             """Handle edited prompt submission."""
+            # Defer the modal interaction before long-running image generation
+            await modal_interaction.response.defer()
+
             self.stop()
             self.hide_buttons()
             if self.message:
@@ -507,6 +519,9 @@ class PromptComparisonView(discord.ui.View):
                 ephemeral=True,
             )
             return
+
+        # Defer the interaction before long-running image generation
+        await interaction.response.defer()
 
         self.stop()
         self.hide_buttons()
