@@ -2319,10 +2319,9 @@ class ImageEditResultView(discord.ui.View):
                 await self.message.edit(embed=self.embed, view=self)
                 return
 
-        # Update button to show success
-        button.label = "Added to Context"
-        button.disabled = True
-        button.style = discord.ButtonStyle.secondary
+        # Remove ALL buttons and stop view
+        self.clear_items()
+        self.stop()
 
         # Update embed description
         if self.embed:
@@ -6442,7 +6441,74 @@ class VariationCarouselView(discord.ui.View):
             self.current_index += 1
             await self._update_embed()
 
-    # Row 1: Variation generation buttons
+    # Row 1: Action buttons - [Add to Context] [Same Prompt] [AI Remix] [X]
+    @discord.ui.button(label="Add to Context", style=discord.ButtonStyle.success, row=1)
+    async def add_to_context_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button["VariationCarouselView"],
+    ) -> None:
+        """Add the currently displayed image to the channel context."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can use this.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        # Get the currently displayed image
+        current_image = self._get_current_image()
+
+        # Store the image in context
+        if self.repo and interaction.channel_id is not None:
+            try:
+                await self.repo.create_channel(interaction.channel_id)
+                images = [current_image]
+                str_images = json.dumps(images)
+                await self.repo.add_message_with_images(
+                    interaction.channel_id,
+                    "Fal.AI",
+                    "prompt",
+                    False,
+                    "Image Variation",
+                    str_images,
+                    is_image_only_context=True,
+                )
+                self.added_to_context = True
+                logger.info(
+                    "variation_carousel_added_to_context",
+                    view="VariationCarouselView",
+                    channel_id=interaction.channel_id,
+                    image_index=self.current_index,
+                )
+            except Exception as e:
+                logger.error(
+                    "variation_carousel_add_failed",
+                    view="VariationCarouselView",
+                    error=str(e),
+                )
+                if self.embed:
+                    self.embed.description = f"Failed to add image to context: {e}"
+                    self.embed.color = EMBED_COLOR_ERROR
+                await self.message.edit(embed=self.embed, view=self)
+                return
+
+        # E4-T4: Remove ALL buttons after Add to Context
+        self._hide_buttons()
+        self.stop()
+
+        # Update embed description
+        if self.embed:
+            position_label = "original" if self.current_index == 0 else f"variation {self.current_index}"
+            self.embed.description = (
+                f"Image ({position_label}) added to context successfully!\n"
+                "You can use it for future /describe_this and /modify_image commands."
+            )
+
+        await self.message.edit(embed=self.embed, view=self)
+
     @discord.ui.button(label="Same Prompt", style=discord.ButtonStyle.secondary, row=1)
     async def same_prompt_button(
         self,
@@ -6660,74 +6726,6 @@ class VariationCarouselView(discord.ui.View):
 
         finally:
             self._generating = False
-
-    # Row 1: Action buttons (alongside variation buttons)
-    @discord.ui.button(label="Add to Context", style=discord.ButtonStyle.success, row=1)
-    async def add_to_context_button(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button["VariationCarouselView"],
-    ) -> None:
-        """Add the currently displayed image to the channel context."""
-        if self.user_id != interaction.user.id:
-            await interaction.response.send_message(
-                f"Only the original requester ({self.username}) can use this.",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.response.defer()
-
-        # Get the currently displayed image
-        current_image = self._get_current_image()
-
-        # Store the image in context
-        if self.repo and interaction.channel_id is not None:
-            try:
-                await self.repo.create_channel(interaction.channel_id)
-                images = [current_image]
-                str_images = json.dumps(images)
-                await self.repo.add_message_with_images(
-                    interaction.channel_id,
-                    "Fal.AI",
-                    "prompt",
-                    False,
-                    "Image Variation",
-                    str_images,
-                    is_image_only_context=True,
-                )
-                self.added_to_context = True
-                logger.info(
-                    "variation_carousel_added_to_context",
-                    view="VariationCarouselView",
-                    channel_id=interaction.channel_id,
-                    image_index=self.current_index,
-                )
-            except Exception as e:
-                logger.error(
-                    "variation_carousel_add_failed",
-                    view="VariationCarouselView",
-                    error=str(e),
-                )
-                if self.embed:
-                    self.embed.description = f"Failed to add image to context: {e}"
-                    self.embed.color = EMBED_COLOR_ERROR
-                await self.message.edit(embed=self.embed, view=self)
-                return
-
-        # E4-T4: Remove ALL buttons after Add to Context
-        self._hide_buttons()
-        self.stop()
-
-        # Update embed description
-        if self.embed:
-            position_label = "original" if self.current_index == 0 else f"variation {self.current_index}"
-            self.embed.description = (
-                f"Image ({position_label}) added to context successfully!\n"
-                "You can use it for future /describe_this and /modify_image commands."
-            )
-
-        await self.message.edit(embed=self.embed, view=self)
 
     @discord.ui.button(label="X", style=discord.ButtonStyle.danger, row=1)
     async def cancel_button(
