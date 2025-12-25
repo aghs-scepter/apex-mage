@@ -6173,8 +6173,7 @@ class VariationCarouselView(discord.ui.View):
     - Embed shows current image with position indicator
     - Source thumbnail shown above (if from modify_image)
     - Row 0: [<] [>] navigation
-    - Row 1: [Same Prompt] [AI Remix] variation buttons
-    - Row 2: [Add to Context] [Cancel]
+    - Row 1: [Add to Context] [Same Prompt] [AI Remix] [X] action buttons
     """
 
     MAX_VARIATIONS = 3
@@ -6356,6 +6355,10 @@ class VariationCarouselView(discord.ui.View):
         at_max_variations = len(self.variations) >= self.MAX_VARIATIONS
         self.same_prompt_button.disabled = at_max_variations
         self.ai_remix_button.disabled = at_max_variations
+
+        # Action buttons: always enabled (unless view is stopped)
+        self.add_to_context_button.disabled = False
+        self.cancel_button.disabled = False
 
     def _disable_all_buttons(self) -> None:
         """Disable all non-link buttons."""
@@ -6643,8 +6646,8 @@ class VariationCarouselView(discord.ui.View):
         finally:
             self._generating = False
 
-    # Row 2: Action buttons
-    @discord.ui.button(label="Add to Context", style=discord.ButtonStyle.success, row=2)
+    # Row 1: Action buttons (alongside variation buttons)
+    @discord.ui.button(label="Add to Context", style=discord.ButtonStyle.success, row=1)
     async def add_to_context_button(
         self,
         interaction: discord.Interaction,
@@ -6711,7 +6714,7 @@ class VariationCarouselView(discord.ui.View):
 
         await self.message.edit(embed=self.embed, view=self)
 
-    @discord.ui.button(label="X", style=discord.ButtonStyle.danger, row=2)
+    @discord.ui.button(label="X", style=discord.ButtonStyle.danger, row=1)
     async def cancel_button(
         self,
         interaction: discord.Interaction,
