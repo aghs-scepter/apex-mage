@@ -10,14 +10,14 @@ All methods are async and delegate to the underlying repository.
 
 import asyncio
 import json
-import logging
 from os import getenv
 from typing import Any, cast
 
 from src.adapters.sqlite_repository import SQLiteRepository
+from src.core.logging import get_logger
 from src.ports.repositories import Message
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Context window size - number of previous messages to use as context
 # High values increase cost and latency
@@ -78,12 +78,12 @@ class RepositoryAdapter:
                 model_config = json.dumps(allowed_vendors[vendor_name]["model"])
                 vendor = await self._repo.create_vendor(vendor_name, model_config)
                 self._vendor_cache[vendor_name] = vendor.id
-                logger.debug(f"Vendor {vendor_name} validated with id {vendor.id}")
+                logger.debug("vendor_validated", vendor_name=vendor_name, vendor_id=vendor.id)
         except FileNotFoundError:
             logger.error("allowed_vendors.json file not found.")
             raise
         except Exception as ex:
-            logger.error(f"Error validating vendors: {ex}")
+            logger.error("vendor_validation_error", error=str(ex))
             raise
 
     @staticmethod
@@ -108,9 +108,9 @@ class RepositoryAdapter:
         Args:
             discord_id: The Discord channel ID.
         """
-        logger.debug(f"Creating channel {discord_id}...")
+        logger.debug("creating_channel", discord_id=discord_id)
         await self._repo.get_or_create_channel(discord_id)
-        logger.debug(f"Channel {discord_id} created or already exists.")
+        logger.debug("channel_created_or_exists", discord_id=discord_id)
 
     async def _get_vendor_id(self, vendor_name: str) -> int:
         """Get vendor ID from cache or database.
@@ -335,7 +335,7 @@ class RepositoryAdapter:
             List of image dicts with 'filename' and 'image' keys.
             Maximum of MAX_CAROUSEL_IMAGES items returned.
         """
-        logger.debug(f"Getting images for channel {discord_id}...")
+        logger.debug("getting_images", discord_id=discord_id)
         messages = await self._repo.get_latest_images(discord_id, vendor_name, limit)
         images: list[dict[str, Any]] = []
         for msg in messages:
@@ -354,7 +354,7 @@ class RepositoryAdapter:
                         pass
         # Enforce the carousel image limit
         images = images[:MAX_CAROUSEL_IMAGES]
-        logger.debug(f"Retrieved {len(images)} images for channel {discord_id}.")
+        logger.debug("images_retrieved", discord_id=discord_id, count=len(images))
         return images
 
     async def has_images_in_context(
@@ -442,7 +442,7 @@ class RepositoryAdapter:
         if request_count < rate_limit:
             return True
         else:
-            logger.warning(f"Text request rate limit exceeded for channel {channel_id}.")
+            logger.warning("text_rate_limit_exceeded", channel_id=channel_id)
             return False
 
     async def enforce_image_rate_limits(
@@ -467,7 +467,7 @@ class RepositoryAdapter:
         if request_count < rate_limit:
             return True
         else:
-            logger.warning(f"Image request rate limit exceeded for channel {channel_id}.")
+            logger.warning("image_rate_limit_exceeded", channel_id=channel_id)
             return False
 
     @staticmethod

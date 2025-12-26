@@ -12,11 +12,11 @@ The class supports both file-based and in-memory (:memory:) databases.
 
 import asyncio
 import json
-import logging
 import sqlite3
 from pathlib import Path
 from typing import Any, cast
 
+from src.core.logging import get_logger
 from src.ports.repositories import (
     ApiKey,
     Channel,
@@ -25,7 +25,7 @@ from src.ports.repositories import (
     Vendor,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # =============================================================================
@@ -535,7 +535,7 @@ class SQLiteRepository:
         This method must be called before using any repository methods,
         unless using the async context manager.
         """
-        logger.debug(f"Connecting to database: {self._db_path}")
+        logger.debug("connecting_to_database", path=self._db_path)
         self._connection = await asyncio.to_thread(self._connect_sync)
         await self._initialize_schema()
         logger.debug("Database connection established and schema initialized")
@@ -627,7 +627,7 @@ class SQLiteRepository:
         """
         existing = await self.get_channel(external_id)
         if existing is not None:
-            logger.debug(f"Channel {external_id} already exists")
+            logger.debug("channel_already_exists", external_id=external_id)
             return existing
 
         conn = self._ensure_connected()
@@ -638,7 +638,7 @@ class SQLiteRepository:
             return cursor.lastrowid or 0
 
         channel_id = await asyncio.to_thread(insert_sync)
-        logger.debug(f"Created channel {external_id} with id {channel_id}")
+        logger.debug("channel_created", external_id=external_id, channel_id=channel_id)
         return Channel(id=channel_id, external_id=external_id)
 
     async def get_or_create_channel(self, external_id: int) -> Channel:
@@ -673,7 +673,7 @@ class SQLiteRepository:
         """
         existing = await self.get_vendor(name)
         if existing is not None:
-            logger.debug(f"Vendor {name} already exists")
+            logger.debug("vendor_already_exists", name=name)
             return existing
 
         conn = self._ensure_connected()
@@ -684,7 +684,7 @@ class SQLiteRepository:
             return cursor.lastrowid or 0
 
         vendor_id = await asyncio.to_thread(insert_sync)
-        logger.debug(f"Created vendor {name} with id {vendor_id}")
+        logger.debug("vendor_created", name=name, vendor_id=vendor_id)
         return Vendor(id=vendor_id, name=name, model_name=model_name)
 
     async def get_or_create_vendor(self, name: str, model_name: str) -> Vendor:
@@ -750,7 +750,7 @@ class SQLiteRepository:
             return cursor.lastrowid or 0
 
         message_id = await asyncio.to_thread(insert_sync)
-        logger.debug(f"Saved message with id {message_id}")
+        logger.debug("message_saved", message_id=message_id)
         return message_id
 
     async def save_message_with_images(
@@ -789,7 +789,7 @@ class SQLiteRepository:
             return cursor.lastrowid or 0
 
         message_id = await asyncio.to_thread(insert_sync)
-        logger.debug(f"Saved message with images, id {message_id}")
+        logger.debug("message_with_images_saved", message_id=message_id)
         return message_id
 
     async def get_visible_messages(
@@ -1047,7 +1047,7 @@ class SQLiteRepository:
             return cursor.lastrowid or 0
 
         api_key_id = await asyncio.to_thread(insert_sync)
-        logger.debug(f"Created API key with id {api_key_id}")
+        logger.debug("api_key_created", api_key_id=api_key_id)
 
         # Return the created key with ID populated
         return ApiKey(
@@ -1071,7 +1071,7 @@ class SQLiteRepository:
             conn.commit()
 
         await asyncio.to_thread(update_sync)
-        logger.debug(f"Updated last_used_at for API key hash {key_hash[:8]}...")
+        logger.debug("api_key_last_used_updated", key_hash_prefix=key_hash[:8])
 
     async def revoke(self, key_hash: str) -> bool:
         """Revoke an API key by setting is_active to False."""
@@ -1084,7 +1084,7 @@ class SQLiteRepository:
 
         rows_affected = await asyncio.to_thread(update_sync)
         if rows_affected > 0:
-            logger.info(f"Revoked API key hash {key_hash[:8]}...")
+            logger.info("api_key_revoked", key_hash_prefix=key_hash[:8])
             return True
         return False
 
@@ -1157,7 +1157,7 @@ class SQLiteRepository:
             conn.commit()
 
         await asyncio.to_thread(insert_sync)
-        logger.info(f"User {username} banned by {performed_by}: {reason}")
+        logger.info("user_banned", username=username, performed_by=performed_by, reason=reason)
 
     async def remove_ban(self, username: str, performed_by: str) -> None:
         """Remove a ban for a user.
@@ -1177,7 +1177,7 @@ class SQLiteRepository:
             conn.commit()
 
         await asyncio.to_thread(delete_sync)
-        logger.info(f"User {username} unbanned by {performed_by}")
+        logger.info("user_unbanned", username=username, performed_by=performed_by)
 
     # =========================================================================
     # BehaviorPresetRepository Implementation
@@ -1267,7 +1267,7 @@ class SQLiteRepository:
             conn.commit()
 
         await asyncio.to_thread(insert_sync)
-        logger.debug(f"Created behavior preset '{name}' for guild {guild_id}")
+        logger.debug("preset_created", name=name, guild_id=guild_id)
 
     async def update_preset(
         self,
@@ -1294,7 +1294,7 @@ class SQLiteRepository:
             conn.commit()
 
         await asyncio.to_thread(update_sync)
-        logger.debug(f"Updated behavior preset '{name}' for guild {guild_id}")
+        logger.debug("preset_updated", name=name, guild_id=guild_id)
 
     async def delete_preset(self, guild_id: str, name: str) -> None:
         """Delete a behavior preset.
@@ -1310,7 +1310,7 @@ class SQLiteRepository:
             conn.commit()
 
         await asyncio.to_thread(delete_sync)
-        logger.debug(f"Deleted behavior preset '{name}' for guild {guild_id}")
+        logger.debug("preset_deleted", name=name, guild_id=guild_id)
 
     # =========================================================================
     # SearchRejectionRepository Implementation

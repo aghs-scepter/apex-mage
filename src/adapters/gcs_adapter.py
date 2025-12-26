@@ -5,13 +5,14 @@ Google Cloud Storage, returning public URLs for the uploaded files.
 """
 
 import base64
-import logging
 from typing import cast
 from uuid import uuid4
 
 from google.cloud import storage
 
-logger = logging.getLogger(__name__)
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class GCSUploadError(Exception):
@@ -58,7 +59,7 @@ class GCSAdapter:
             channel_id=12345,
             content="# Long Response\nContent here..."
         )
-        print(f"Uploaded to: {url}")
+        # url contains the public URL of the uploaded file
     """
 
     def __init__(self, bucket_name: str = "apex-mage-data") -> None:

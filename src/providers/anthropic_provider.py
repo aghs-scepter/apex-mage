@@ -7,14 +7,14 @@ for Anthropic's Claude API.
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import AsyncIterator
 
 from anthropic import APIStatusError, AsyncAnthropic
 
+from src.core.logging import get_logger
 from src.core.providers import AIProvider, ChatMessage, ChatResponse
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AnthropicProvider:

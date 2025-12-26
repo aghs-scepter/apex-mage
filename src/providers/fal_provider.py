@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import logging
 from typing import Any
 
 import fal_client
 
 from src.core.errors import classify_error, is_retryable
+from src.core.logging import get_logger
 from src.core.providers import (
     GeneratedImage,
     ImageModifyRequest,
@@ -21,7 +21,7 @@ from src.core.providers import (
     ImageRequest,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class FalAIError(Exception):

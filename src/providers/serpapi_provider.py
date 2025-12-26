@@ -6,13 +6,14 @@ It returns structured image results with URLs, thumbnails, titles, and source UR
 
 from __future__ import annotations
 
-import logging
 import os
 from dataclasses import dataclass
 
 import aiohttp
 
-logger = logging.getLogger(__name__)
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class SerpAPIError(Exception):
