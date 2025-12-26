@@ -1,6 +1,6 @@
 """Tests for the image API routes."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -48,7 +48,7 @@ def mock_rate_limiter():
         return_value=RateLimitResult(
             allowed=True,
             remaining=7,
-            reset_at=datetime.now(timezone.utc),
+            reset_at=datetime.now(UTC),
             wait_seconds=None,
         )
     )
@@ -160,7 +160,7 @@ class TestGenerateImage:
         mock_rate_limiter.check.return_value = RateLimitResult(
             allowed=False,
             remaining=0,
-            reset_at=datetime.now(timezone.utc),
+            reset_at=datetime.now(UTC),
             wait_seconds=60.0,
         )
 
@@ -272,7 +272,7 @@ class TestModifyImage:
         mock_rate_limiter.check.return_value = RateLimitResult(
             allowed=False,
             remaining=0,
-            reset_at=datetime.now(timezone.utc),
+            reset_at=datetime.now(UTC),
             wait_seconds=60.0,
         )
 

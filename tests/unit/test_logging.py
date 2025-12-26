@@ -5,7 +5,6 @@ import logging
 from io import StringIO
 from unittest.mock import patch
 
-import pytest
 import structlog
 
 from src.core.logging import (
@@ -159,7 +158,7 @@ class TestProductionJsonOutput:
             # Should be valid JSON (might have multiple lines)
             if log_output.strip():
                 # Parse the last line which should be our log
-                lines = [l for l in log_output.strip().split("\n") if l]
+                lines = [line for line in log_output.strip().split("\n") if line]
                 if lines:
                     last_line = lines[-1]
                     parsed = json.loads(last_line)

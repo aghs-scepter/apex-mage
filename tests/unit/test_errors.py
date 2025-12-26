@@ -1,6 +1,5 @@
 """Tests for error classification and handling."""
 
-import asyncio
 
 import pytest
 
@@ -41,7 +40,7 @@ class TestClassifyError:
 
     def test_classifies_asyncio_timeout(self) -> None:
         """Should classify asyncio.TimeoutError as TIMEOUT."""
-        error = asyncio.TimeoutError()
+        error = TimeoutError()
         assert classify_error(error) == ErrorCategory.TIMEOUT
 
     def test_classifies_rate_limit_from_message(self) -> None:

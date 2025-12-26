@@ -1,6 +1,6 @@
 """Tests for the conversation API routes."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -46,7 +46,7 @@ def mock_rate_limiter():
         return_value=RateLimitResult(
             allowed=True,
             remaining=29,
-            reset_at=datetime.now(timezone.utc),
+            reset_at=datetime.now(UTC),
             wait_seconds=None,
         )
     )
@@ -135,7 +135,7 @@ class TestCreateConversation:
         mock_rate_limiter.check.return_value = RateLimitResult(
             allowed=False,
             remaining=0,
-            reset_at=datetime.now(timezone.utc),
+            reset_at=datetime.now(UTC),
             wait_seconds=60.0,
         )
 
@@ -220,7 +220,7 @@ class TestSendMessage:
         mock_rate_limiter.check.return_value = RateLimitResult(
             allowed=False,
             remaining=0,
-            reset_at=datetime.now(timezone.utc),
+            reset_at=datetime.now(UTC),
             wait_seconds=60.0,
         )
 
