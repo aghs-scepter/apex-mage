@@ -1,7 +1,7 @@
 """Shared utilities for Discord commands."""
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import discord
 
@@ -68,3 +68,23 @@ def create_embed_user(interaction: discord.Interaction) -> dict[str, object]:
         "id": interaction.user.id,
         "pfp": interaction.user.avatar,
     }
+
+
+# Default avatar URL for system/fallback user
+DEFAULT_AVATAR_URL = (
+    "https://github.com/aghs-scepter/apex-mage/raw/main/assets/default_pfp.png"
+)
+
+
+def get_user_info(user: dict[str, Any] | None) -> tuple[str, int, str]:
+    """Get username, user ID, and avatar from a user dict.
+
+    Args:
+        user: Dict with name, id, and pfp keys, or None.
+
+    Returns:
+        Tuple of (username, user_id, avatar_url).
+    """
+    if user:
+        return user["name"], user["id"], user["pfp"]
+    return "System", 0, DEFAULT_AVATAR_URL

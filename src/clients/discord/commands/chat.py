@@ -26,9 +26,9 @@ from src.core.auto_summarization import (
     get_auto_summarization_manager,
     perform_summarization,
 )
+from src.core.conversation import convert_context_to_messages
 from src.core.haiku import SummarizationError, haiku_summarize_conversation
 from src.core.image_utils import compress_image
-from src.core.providers import ChatMessage
 from src.core.token_counting import check_token_threshold, count_tokens
 
 if TYPE_CHECKING:
@@ -775,46 +775,6 @@ class BehaviorPresetGroup(app_commands.Group):
         return await self._preset_name_autocomplete(interaction, current)
 
 
-def _convert_context_to_messages(
-    context: list[dict[str, Any]],
-) -> tuple[list[ChatMessage], str | None]:
-    """Convert database context to ChatMessage list and extract system prompt.
-
-    Args:
-        context: List of message dicts from the repository.
-
-    Returns:
-        Tuple of (chat_messages, system_prompt) where system_prompt is the most
-        recent behavior message or None.
-    """
-    messages: list[ChatMessage] = []
-    system_prompt: str | None = None
-
-    # Find the most recent behavior message (system prompt)
-    for row in reversed(context):
-        if row["message_type"] == "behavior":
-            system_prompt = row["message_data"]
-            break
-
-    # Convert non-behavior messages to ChatMessages
-    for row in context:
-        msg_type = row["message_type"]
-        if msg_type == "behavior":
-            continue  # Skip behavior messages - they become system prompt
-
-        # Map message_type to ChatMessage role
-        if msg_type == "prompt":
-            role = "user"
-        elif msg_type == "assistant":
-            role = "assistant"
-        else:
-            continue  # Skip unknown types
-
-        messages.append(ChatMessage(role=role, content=row["message_data"]))
-
-    return messages, system_prompt
-
-
 def register_chat_commands(bot: "DiscordBot") -> None:
     """Register chat-related commands with the bot.
 
@@ -1027,7 +987,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                             summarization_manager.clear_pending(channel_id)
 
                     # Convert context to ChatMessages and extract system prompt
-                    chat_messages, system_prompt = _convert_context_to_messages(context)
+                    chat_messages, system_prompt = convert_context_to_messages(context)
                     chat_response = await bot.ai_provider.chat(
                         chat_messages, system_prompt=system_prompt
                     )

@@ -18,6 +18,7 @@ from src.clients.discord.constants import (
     EXTENDED_USER_INTERACTION_TIMEOUT,
     USER_INTERACTION_TIMEOUT,
 )
+from src.clients.discord.utils import get_user_info
 from src.core.haiku import (
     HaikuError,
     ImageDescriptionError,
@@ -49,24 +50,6 @@ logger = get_logger(__name__)
 
 # Alias for backwards compatibility
 RESULT_VIEW_TIMEOUT = EXTENDED_USER_INTERACTION_TIMEOUT
-
-
-def get_user_info(user: dict[str, Any] | None) -> tuple[str, int, str]:
-    """Get username, user ID, and avatar from a user dict.
-
-    Args:
-        user: Dict with name, id, and pfp keys, or None.
-
-    Returns:
-        Tuple of (username, user_id, avatar_url).
-    """
-    if user:
-        return user["name"], user["id"], user["pfp"]
-    return (
-        "System",
-        0,
-        "https://github.com/aghs-scepter/apex-mage/raw/main/assets/default_pfp.png",
-    )
 
 
 async def create_file_from_image(image_data: dict[str, str]) -> discord.File:

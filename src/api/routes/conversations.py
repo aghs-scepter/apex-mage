@@ -4,7 +4,6 @@ These routes provide endpoints for managing conversations and messages.
 """
 
 from datetime import UTC, datetime
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -19,51 +18,14 @@ from src.api.schemas import (
     ErrorResponse,
     MessageResponse,
 )
+from src.core.conversation import convert_context_to_messages
 from src.core.logging import bind_contextvars, clear_contextvars, get_logger
-from src.core.providers import AIProvider, ChatMessage
+from src.core.providers import AIProvider
 from src.core.rate_limit import SlidingWindowRateLimiter
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
-
-
-def _convert_context_to_messages(
-    context: list[dict[str, Any]],
-) -> tuple[list[ChatMessage], str | None]:
-    """Convert database context to ChatMessage list and extract system prompt.
-
-    Args:
-        context: List of message dicts from the repository.
-
-    Returns:
-        Tuple of (chat_messages, system_prompt).
-    """
-    messages: list[ChatMessage] = []
-    system_prompt: str | None = None
-
-    # Find the most recent behavior message (system prompt)
-    for row in reversed(context):
-        if row["message_type"] == "behavior":
-            system_prompt = row["message_data"]
-            break
-
-    # Convert non-behavior messages to ChatMessages
-    for row in context:
-        msg_type = row["message_type"]
-        if msg_type == "behavior":
-            continue
-
-        if msg_type == "prompt":
-            role = "user"
-        elif msg_type == "assistant":
-            role = "assistant"
-        else:
-            continue
-
-        messages.append(ChatMessage(role=role, content=row["message_data"]))
-
-    return messages, system_prompt
 
 
 @router.post(
@@ -147,7 +109,7 @@ async def create_conversation(
 
             # Get AI response
             context = await repo.get_visible_messages(conversation_id, "All Models")
-            chat_messages, system_prompt = _convert_context_to_messages(context)
+            chat_messages, system_prompt = convert_context_to_messages(context)
 
             chat_response = await ai_provider.chat(
                 chat_messages, system_prompt=system_prompt
@@ -301,7 +263,7 @@ async def send_message(
 
         # Get context and generate response
         context = await repo.get_visible_messages(conversation_id, "All Models")
-        chat_messages, system_prompt = _convert_context_to_messages(context)
+        chat_messages, system_prompt = convert_context_to_messages(context)
 
         chat_response = await ai_provider.chat(
             chat_messages, system_prompt=system_prompt

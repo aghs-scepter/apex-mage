@@ -17,29 +17,12 @@ from src.clients.discord.constants import (
     EMBED_COLOR_INFO,
     USER_INTERACTION_TIMEOUT,
 )
+from src.clients.discord.utils import get_user_info
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 # Threshold for long prompt warning
 LONG_PROMPT_THRESHOLD = 500
-
-
-def get_user_info(user: dict[str, Any] | None) -> tuple[str, int, str]:
-    """Get username, user ID, and avatar from a user dict.
-
-    Args:
-        user: Dict with name, id, and pfp keys, or None.
-
-    Returns:
-        Tuple of (username, user_id, avatar_url).
-    """
-    if user:
-        return user["name"], user["id"], user["pfp"]
-    return (
-        "System",
-        0,
-        "https://github.com/aghs-scepter/apex-mage/raw/main/assets/default_pfp.png",
-    )
 
 
 class PromptRefinementView(discord.ui.View):

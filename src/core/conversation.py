@@ -6,6 +6,7 @@ estimation. All logic is pure computation with no I/O dependencies.
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 from src.core.providers import ChatMessage
 
@@ -119,3 +120,50 @@ class ContextBuilder:
             return 0
         # ~4 characters per token is a reasonable heuristic
         return max(1, len(text) // 4)
+
+
+def convert_context_to_messages(
+    context: list[dict[str, Any]],
+) -> tuple[list[ChatMessage], str | None]:
+    """Convert database context to ChatMessage list and extract system prompt.
+
+    Processes message history from the repository format into a list of
+    ChatMessage objects suitable for AI providers. Behavior messages are
+    extracted as the system prompt rather than included in the message list.
+
+    Args:
+        context: List of message dicts from the repository. Each dict should
+            have 'message_type' and 'message_data' keys. Valid message_type
+            values are 'behavior', 'prompt', and 'assistant'.
+
+    Returns:
+        Tuple of (chat_messages, system_prompt) where:
+        - chat_messages: List of ChatMessage objects with role and content
+        - system_prompt: The most recent behavior message content, or None
+    """
+    messages: list[ChatMessage] = []
+    system_prompt: str | None = None
+
+    # Find the most recent behavior message (system prompt)
+    for row in reversed(context):
+        if row["message_type"] == "behavior":
+            system_prompt = row["message_data"]
+            break
+
+    # Convert non-behavior messages to ChatMessages
+    for row in context:
+        msg_type = row["message_type"]
+        if msg_type == "behavior":
+            continue  # Skip behavior messages - they become system prompt
+
+        # Map message_type to ChatMessage role
+        if msg_type == "prompt":
+            role = "user"
+        elif msg_type == "assistant":
+            role = "assistant"
+        else:
+            continue  # Skip unknown types
+
+        messages.append(ChatMessage(role=role, content=row["message_data"]))
+
+    return messages, system_prompt
