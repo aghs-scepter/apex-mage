@@ -126,9 +126,38 @@ If successful, you should be able to connect without a password prompt.
 - Verify the workflow file exists at `.github/workflows/deploy.yml`
 - Check that secrets are configured at the repository level (not environment level)
 
+## Application Environment Variables
+
+The following environment variables must be configured on the deployment VM. These are typically set in a `.env` file or in the container's environment.
+
+### Required in Production
+
+| Variable | Description |
+|----------|-------------|
+| `ENVIRONMENT` | Set to `production` for production deployments |
+| `JWT_SECRET_KEY` | **Required in production.** Secret key for signing JWT tokens. Must be a strong, randomly-generated value (min 32 characters). The application will fail to start if this is not set when `ENVIRONMENT=production` or `APP_ENV=production`. |
+| `DISCORD_BOT_TOKEN` | Discord bot authentication token |
+| `ANTHROPIC_API_KEY` | Anthropic API key for Claude |
+| `FAL_KEY` | Fal.AI API key for image generation |
+
+### Security Note: JWT_SECRET_KEY
+
+The `JWT_SECRET_KEY` is critical for API authentication security:
+
+- **Production enforcement**: The application will refuse to start in production mode without an explicit `JWT_SECRET_KEY`. This prevents accidental use of insecure default keys.
+- **Key generation**: Use a cryptographically secure random generator:
+  ```bash
+  openssl rand -base64 32
+  # Or:
+  python -c "import secrets; print(secrets.token_urlsafe(32))"
+  ```
+- **Key rotation**: When rotating keys, existing tokens will become invalid. Plan accordingly.
+- **Development mode**: In development (`ENVIRONMENT=development` or unset), a warning is logged but a default key is used for convenience.
+
 ## Security Considerations
 
 - The SSH private key should be used exclusively for automated deployments
 - Consider rotating the key periodically
 - The deployment key should have minimal permissions on the VM
 - Never commit private keys to the repository
+- Always set `JWT_SECRET_KEY` explicitly in production environments

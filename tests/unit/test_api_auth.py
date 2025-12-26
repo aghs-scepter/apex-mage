@@ -1,5 +1,7 @@
 """Tests for the authentication module."""
 
+import importlib
+import sys
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
@@ -358,3 +360,99 @@ class TestApiKeyStorage:
 
         result = await validate_api_key("key-to-clear-12")
         assert result is None
+
+
+class TestJWTSecretEnforcement:
+    """Tests for JWT secret key enforcement in production."""
+
+    def test_production_requires_jwt_secret_key(self):
+        """Should raise RuntimeError in production without JWT_SECRET_KEY."""
+        # Remove the module from cache to allow reimport
+        modules_to_remove = [
+            key for key in sys.modules if key.startswith("src.api.auth")
+        ]
+        for mod in modules_to_remove:
+            del sys.modules[mod]
+
+        # Mock production environment without JWT_SECRET_KEY
+        env_vars = {
+            "ENVIRONMENT": "production",
+            "APP_ENV": "production",
+        }
+        with patch.dict("os.environ", env_vars, clear=True):
+            with pytest.raises(RuntimeError) as exc_info:
+                importlib.import_module("src.api.auth")
+
+            assert "JWT_SECRET_KEY" in str(exc_info.value)
+            assert "production" in str(exc_info.value).lower()
+
+        # Restore the module for other tests
+        modules_to_remove = [
+            key for key in sys.modules if key.startswith("src.api.auth")
+        ]
+        for mod in modules_to_remove:
+            del sys.modules[mod]
+        # Re-import with default (development) settings
+        importlib.import_module("src.api.auth")
+
+    def test_development_allows_default_key(self):
+        """Should allow default key in development mode."""
+        # Remove the module from cache
+        modules_to_remove = [
+            key for key in sys.modules if key.startswith("src.api.auth")
+        ]
+        for mod in modules_to_remove:
+            del sys.modules[mod]
+
+        # Mock development environment without JWT_SECRET_KEY
+        env_vars = {
+            "ENVIRONMENT": "development",
+        }
+        with patch.dict("os.environ", env_vars, clear=True):
+            # Should not raise, but may warn
+            import warnings
+
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                auth_module = importlib.import_module("src.api.auth")
+                # Check that the module loaded and has the expected fallback
+                assert hasattr(auth_module, "JWT_SECRET_KEY")
+                assert auth_module.JWT_SECRET_KEY == "dev-secret-key-change-in-production"
+                # Should have issued a warning
+                assert len(w) >= 1
+                assert any("JWT_SECRET_KEY" in str(warning.message) for warning in w)
+
+        # Restore the module for other tests
+        modules_to_remove = [
+            key for key in sys.modules if key.startswith("src.api.auth")
+        ]
+        for mod in modules_to_remove:
+            del sys.modules[mod]
+        importlib.import_module("src.api.auth")
+
+    def test_production_with_jwt_secret_key_succeeds(self):
+        """Should succeed in production when JWT_SECRET_KEY is set."""
+        # Remove the module from cache
+        modules_to_remove = [
+            key for key in sys.modules if key.startswith("src.api.auth")
+        ]
+        for mod in modules_to_remove:
+            del sys.modules[mod]
+
+        # Mock production environment WITH JWT_SECRET_KEY
+        env_vars = {
+            "ENVIRONMENT": "production",
+            "JWT_SECRET_KEY": "super-secure-production-key-123",
+        }
+        with patch.dict("os.environ", env_vars, clear=True):
+            # Should not raise
+            auth_module = importlib.import_module("src.api.auth")
+            assert auth_module.JWT_SECRET_KEY == "super-secure-production-key-123"
+
+        # Restore the module for other tests
+        modules_to_remove = [
+            key for key in sys.modules if key.startswith("src.api.auth")
+        ]
+        for mod in modules_to_remove:
+            del sys.modules[mod]
+        importlib.import_module("src.api.auth")
