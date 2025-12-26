@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from src.clients.discord.constants import API_TIMEOUT_SECONDS
 from src.core.haiku import HaikuError, haiku_complete
 from src.core.image_utils import compress_image, image_strip_headers
 from src.core.logging import get_logger
@@ -24,6 +23,9 @@ if TYPE_CHECKING:
     from src.core.rate_limit import SlidingWindowRateLimiter
 
 logger = get_logger(__name__)
+
+# Timeout for image generation API calls (seconds)
+API_TIMEOUT_SECONDS = 180
 
 
 # System prompt for remixing image prompts
