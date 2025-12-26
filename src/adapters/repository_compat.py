@@ -8,10 +8,11 @@ repository usage.
 All methods are async and delegate to the underlying repository.
 """
 
+import asyncio
 import json
 import logging
 from os import getenv
-from typing import Any
+from typing import Any, cast
 
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.ports.repositories import Message
@@ -72,8 +73,7 @@ class RepositoryAdapter:
         """
         logger.debug("Validating vendors...")
         try:
-            with open("allowed_vendors.json") as file:
-                allowed_vendors = json.load(file)
+            allowed_vendors = await asyncio.to_thread(self._load_vendors_sync)
             for vendor_name in allowed_vendors.keys():
                 model_config = json.dumps(allowed_vendors[vendor_name]["model"])
                 vendor = await self._repo.create_vendor(vendor_name, model_config)
@@ -85,6 +85,22 @@ class RepositoryAdapter:
         except Exception as ex:
             logger.error(f"Error validating vendors: {ex}")
             raise
+
+    @staticmethod
+    def _load_vendors_sync() -> dict[str, Any]:
+        """Load vendors from JSON file synchronously.
+
+        This helper exists to be called via asyncio.to_thread() to avoid
+        blocking the event loop with file I/O.
+
+        Returns:
+            Dictionary of vendor configurations.
+
+        Raises:
+            FileNotFoundError: If allowed_vendors.json is not found.
+        """
+        with open("allowed_vendors.json") as file:
+            return cast(dict[str, Any], json.load(file))
 
     async def create_channel(self, discord_id: int) -> None:
         """Create a channel record if it doesn't exist.
