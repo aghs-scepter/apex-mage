@@ -678,8 +678,10 @@ class ImageSelectionTypeView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(embed=self.embed, view=self)
-            except Exception:
-                pass  # Message may have been deleted
+            except discord.NotFound:
+                pass  # Message deleted, expected
+            except discord.HTTPException as e:
+                logger.warning("message_edit_failed", error=str(e))
 
 
 class ImageCarouselView(discord.ui.View):
@@ -794,8 +796,10 @@ class ImageCarouselView(discord.ui.View):
         try:
             if self.message:
                 await self.message.edit(embed=self.embed, attachments=[], view=self)
-        except Exception:
-            pass  # Message may have been deleted
+        except discord.NotFound:
+            pass  # Message deleted, expected
+        except discord.HTTPException as e:
+            logger.warning("message_edit_failed", error=str(e))
 
     async def create_embed(
         self, interaction: discord.Interaction
@@ -1189,8 +1193,10 @@ class AIAssistResultView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(embed=self.embed, view=self)
-            except Exception:
-                pass
+            except discord.NotFound:
+                pass  # Message deleted, expected
+            except discord.HTTPException as e:
+                logger.warning("message_edit_failed", error=str(e))
 
 
 class AIAssistErrorView(discord.ui.View):
@@ -1303,8 +1309,10 @@ class AIAssistErrorView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(embed=self.embed, view=self)
-            except Exception:
-                pass
+            except discord.NotFound:
+                pass  # Message deleted, expected
+            except discord.HTTPException as e:
+                logger.warning("message_edit_failed", error=str(e))
 
 
 class ImageEditTypeView(discord.ui.View):
@@ -1496,8 +1504,10 @@ class ImageEditTypeView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(embed=self.embed, attachments=[], view=self)
-            except Exception:
-                pass  # Message may have been deleted
+            except discord.NotFound:
+                pass  # Message deleted, expected
+            except discord.HTTPException as e:
+                logger.warning("message_edit_failed", error=str(e))
 
 
 class ImageEditPromptModal(discord.ui.Modal, title="Image Edit Instructions"):
@@ -1883,8 +1893,10 @@ class EditPromptPreviewView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(embed=self.embed, attachments=[], view=self)
-            except Exception:
-                pass  # Message may have been deleted
+            except discord.NotFound:
+                pass  # Message deleted, expected
+            except discord.HTTPException as e:
+                logger.warning("message_edit_failed", error=str(e))
 
 
 class ImageEditPerformView(discord.ui.View):
@@ -1998,8 +2010,10 @@ class ImageEditPerformView(discord.ui.View):
                 embed=self.embed,
                 view=None,
             )
-        except Exception:
-            pass
+        except discord.NotFound:
+            pass  # Message deleted, expected
+        except discord.HTTPException as e:
+            logger.warning("message_edit_failed", error=str(e))
 
     async def perform_edit(self, prompt: str) -> None:
         """Perform the actual image modification using the AI service."""
@@ -2250,8 +2264,10 @@ class ImageEditResultView(discord.ui.View):
 
         try:
             await self.message.edit(embed=self.embed, view=self)
-        except Exception:
-            pass
+        except discord.NotFound:
+            pass  # Message deleted, expected
+        except discord.HTTPException as e:
+            logger.warning("message_edit_failed", error=str(e))
 
     @discord.ui.button(label="Add to Context", style=discord.ButtonStyle.success, row=0)
     async def add_to_context_button(
@@ -2544,8 +2560,10 @@ class ImageGenerationResultView(discord.ui.View):
         try:
             if self.message:
                 await self.message.edit(embed=self.embed, view=self)
-        except Exception:
-            pass  # Message may have been deleted
+        except discord.NotFound:
+            pass  # Message deleted, expected
+        except discord.HTTPException as e:
+            logger.warning("message_edit_failed", error=str(e))
 
     @discord.ui.button(label="Add to Context", style=discord.ButtonStyle.success, row=0)
     async def add_to_context_button(
@@ -2894,8 +2912,10 @@ class MultiImageCarouselView(discord.ui.View):
         try:
             if self.message:
                 await self.message.edit(embed=self.embed, attachments=[], view=self)
-        except Exception:
-            pass  # Message may have been deleted
+        except discord.NotFound:
+            pass  # Message deleted, expected
+        except discord.HTTPException as e:
+            logger.warning("message_edit_failed", error=str(e))
 
     async def update_embed(self, interaction: discord.Interaction) -> None:
         """Update the embed with the current image after navigation or selection."""
@@ -3574,8 +3594,8 @@ class GoogleResultsCarouselView(discord.ui.View):
                     # Replace extension with .jpeg for consistency
                     name_without_ext = filename.rsplit(".", 1)[0]
                     return f"{name_without_ext}.jpeg"
-        except Exception:
-            pass
+        except (ValueError, AttributeError) as e:
+            logger.warning("filename_extraction_failed", url=url, error=str(e))
         # Default filename
         return "google_image.jpeg"
 
@@ -3847,8 +3867,10 @@ class GoogleResultsCarouselView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(embed=self.embed, attachments=[], view=self)
-            except Exception:
-                pass  # Message may have been deleted
+            except discord.NotFound:
+                pass  # Message deleted, expected
+            except discord.HTTPException as e:
+                logger.warning("message_edit_failed", error=str(e))
 
 
 class SummarizePreviewView(discord.ui.View):
@@ -3982,8 +4004,10 @@ class SummarizePreviewView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(embed=self.embed, view=self)
-            except Exception:
-                pass  # Message may have been deleted
+            except discord.NotFound:
+                pass  # Message deleted, expected
+            except discord.HTTPException as e:
+                logger.warning("message_edit_failed", error=str(e))
 
 
 class DescribeImageSourceView(discord.ui.View):
@@ -4356,8 +4380,10 @@ class DescribeImageSourceView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(embed=self.embed, view=self)
-            except Exception:
-                pass  # Message may have been deleted
+            except discord.NotFound:
+                pass  # Message deleted, expected
+            except discord.HTTPException as e:
+                logger.warning("message_edit_failed", error=str(e))
 
 
 class DescribeSingleImageCarouselView(discord.ui.View):
@@ -4499,8 +4525,10 @@ class DescribeSingleImageCarouselView(discord.ui.View):
         try:
             if self.message:
                 await self.message.edit(embed=self.embed, attachments=[], view=self)
-        except Exception:
-            pass  # Message may have been deleted
+        except discord.NotFound:
+            pass  # Message deleted, expected
+        except discord.HTTPException as e:
+            logger.warning("message_edit_failed", error=str(e))
 
     async def update_embed(self, interaction: discord.Interaction) -> None:
         """Update the embed with the current image after navigation."""
@@ -4880,8 +4908,10 @@ class DescribeGoogleResultsCarouselView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(embed=self.embed, view=self)
-            except Exception:
-                pass  # Message may have been deleted
+            except discord.NotFound:
+                pass  # Message deleted, expected
+            except discord.HTTPException as e:
+                logger.warning("message_edit_failed", error=str(e))
 
 
 class DescriptionEditModal(discord.ui.Modal, title="Edit Description"):
@@ -5213,8 +5243,10 @@ class EditPromptConfirmView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(embed=self.embed, attachments=[], view=None)
-            except Exception:
-                pass  # Message may have been deleted
+            except discord.NotFound:
+                pass  # Message deleted, expected
+            except discord.HTTPException as e:
+                logger.warning("message_edit_failed", error=str(e))
 
 
 class DescriptionRoutingView(discord.ui.View):
@@ -5641,8 +5673,10 @@ class DescriptionRoutingView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(embed=self.embed, view=self)
-            except Exception:
-                pass  # Message may have been deleted
+            except discord.NotFound:
+                pass  # Message deleted, expected
+            except discord.HTTPException as e:
+                logger.warning("message_edit_failed", error=str(e))
 
 
 class DescriptionDisplayView(discord.ui.View):
@@ -6155,8 +6189,10 @@ class DescriptionDisplayView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(embed=self.embed, view=self)
-            except Exception:
-                pass  # Message may have been deleted
+            except discord.NotFound:
+                pass  # Message deleted, expected
+            except discord.HTTPException as e:
+                logger.warning("message_edit_failed", error=str(e))
 
 
 class VariationCarouselView(discord.ui.View):
@@ -6381,8 +6417,10 @@ class VariationCarouselView(discord.ui.View):
 
         try:
             await self.message.edit(embed=self.embed, view=self)
-        except Exception:
-            pass  # Message may have been deleted
+        except discord.NotFound:
+            pass  # Message deleted, expected
+        except discord.HTTPException as e:
+            logger.warning("message_edit_failed", error=str(e))
 
     # Row 0: Navigation buttons
     @discord.ui.button(label="<", style=discord.ButtonStyle.primary, row=0)

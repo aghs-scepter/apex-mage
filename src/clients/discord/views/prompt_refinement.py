@@ -246,8 +246,10 @@ class PromptRefinementView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(embed=self.embed, view=self)
-            except Exception:
-                pass
+            except discord.NotFound:
+                pass  # Message deleted, expected
+            except discord.HTTPException as e:
+                logger.warning("message_edit_failed", error=str(e))
 
 
 class PromptRefinementFallbackView(discord.ui.View):
@@ -307,8 +309,10 @@ class PromptRefinementFallbackView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(view=self)
-            except Exception:
-                pass
+            except discord.NotFound:
+                pass  # Message deleted, expected
+            except discord.HTTPException as e:
+                logger.warning("message_edit_failed", error=str(e))
 
 
 class PromptEditModal(discord.ui.Modal, title="Edit Refined Prompt"):
@@ -546,5 +550,7 @@ class PromptComparisonView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(embed=self.embed, view=self)
-            except Exception:
-                pass
+            except discord.NotFound:
+                pass  # Message deleted, expected
+            except discord.HTTPException as e:
+                logger.warning("message_edit_failed", error=str(e))

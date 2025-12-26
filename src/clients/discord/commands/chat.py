@@ -29,10 +29,13 @@ from src.core.auto_summarization import (
 from src.core.conversation import convert_context_to_messages
 from src.core.haiku import SummarizationError, haiku_summarize_conversation
 from src.core.image_utils import compress_image
+from src.core.logging import get_logger
 from src.core.token_counting import check_token_threshold, count_tokens
 
 if TYPE_CHECKING:
     from src.clients.discord.bot import DiscordBot
+
+logger = get_logger(__name__)
 
 # Timeout constants
 DEFAULT_PROMPT_TIMEOUT = 240.0
@@ -148,7 +151,8 @@ class SetBehaviorGroup(app_commands.Group):
             )
             await error_view.initialize(interaction)
 
-        except Exception:
+        except Exception as e:
+            logger.exception("unexpected_error", error=str(e))
             error_message = "An unexpected error occurred while processing your request."
             error_notes = [{"name": "Prompt", "value": prompt}]
             error_view = InfoEmbedView(
@@ -255,7 +259,8 @@ class SetBehaviorGroup(app_commands.Group):
                 )
                 await success_view.initialize(select_interaction)
 
-            except Exception:
+            except Exception as e:
+                logger.exception("command_error", error=str(e))
                 error_view = InfoEmbedView(
                     message=select_interaction.message,
                     user=embed_user,
@@ -387,7 +392,8 @@ class BehaviorPresetGroup(app_commands.Group):
             )
             await error_view.initialize(interaction)
 
-        except Exception:
+        except Exception as e:
+            logger.exception("command_error", error=str(e))
             error_view = InfoEmbedView(
                 message=interaction.message,
                 user=embed_user,
@@ -717,7 +723,8 @@ class BehaviorPresetGroup(app_commands.Group):
                 display_prompt, full_prompt_url = await handle_text_overflow(
                     self.bot, "prompt", prompt_text, interaction.channel_id or 0
                 )
-            except Exception:
+            except Exception as e:
+                logger.warning("text_overflow_upload_failed", error=str(e))
                 # If upload fails, just truncate
                 display_prompt = prompt_text[:1000] + "...\n*(truncated)*"
         else:
@@ -981,7 +988,8 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                             # Clear the pending flag
                             summarization_manager.clear_pending(channel_id)
 
-                        except Exception:
+                        except Exception as e:
+                            logger.warning("auto_summarization_failed", error=str(e))
                             # If summarization fails, continue without it
                             # Clear the flag to avoid repeated failures
                             summarization_manager.clear_pending(channel_id)
@@ -1086,7 +1094,8 @@ def register_chat_commands(bot: "DiscordBot") -> None:
             )
             await error_view.initialize(interaction)
 
-        except Exception:
+        except Exception as e:
+            logger.exception("unexpected_error", error=str(e))
             error_message = "An unexpected error occurred while processing your request."
             error_notes = [{"name": "Prompt", "value": prompt}]
             error_view = InfoEmbedView(
@@ -1388,7 +1397,8 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                     )
                     await success_view.initialize(confirm_interaction)
 
-                except Exception:
+                except Exception as e:
+                    logger.exception("command_error", error=str(e))
                     error_view = InfoEmbedView(
                         message=confirm_interaction.message,
                         user=embed_user,
@@ -1423,7 +1433,8 @@ def register_chat_commands(bot: "DiscordBot") -> None:
             )
             await error_view.initialize(interaction)
 
-        except Exception:
+        except Exception as e:
+            logger.exception("command_error", error=str(e))
             error_view = InfoEmbedView(
                 message=interaction.message,
                 user=embed_user,
