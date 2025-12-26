@@ -157,6 +157,15 @@ ruff check src/          # Lint
 mypy src/                # Type check
 ```
 
+## Pre-commit Hooks
+
+```bash
+pre-commit install        # Set up hooks (one-time)
+pre-commit run --all-files  # Run manually
+```
+
+Hooks run ruff (lint + format) and mypy on every commit.
+
 ## Quick Reference
 
 ```bash
