@@ -18,7 +18,6 @@ from src.clients.discord.views.carousel import (
     SummarizePreviewView,
     VariationCarouselView,
     create_file_from_image,
-    get_user_info,
 )
 
 __all__ = [
@@ -39,5 +38,4 @@ __all__ = [
     "SummarizePreviewView",
     "VariationCarouselView",
     "create_file_from_image",
-    "get_user_info",
 ]
