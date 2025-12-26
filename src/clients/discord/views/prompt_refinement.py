@@ -12,16 +12,14 @@ from typing import Any
 
 import discord
 
+from src.clients.discord.constants import (
+    EMBED_COLOR_ERROR,
+    EMBED_COLOR_INFO,
+    USER_INTERACTION_TIMEOUT,
+)
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
-
-EMBED_COLOR_ERROR = 0xE91515
-EMBED_COLOR_INFO = 0x3498DB
-
-# Timeout constants (seconds)
-USER_INTERACTION_TIMEOUT = 300.0  # 5 minutes
-
 # Threshold for long prompt warning
 LONG_PROMPT_THRESHOLD = 500
 

@@ -11,6 +11,13 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 import discord
 
+from src.clients.discord.constants import (
+    API_TIMEOUT_SECONDS,
+    EMBED_COLOR_ERROR,
+    EMBED_COLOR_INFO,
+    EXTENDED_USER_INTERACTION_TIMEOUT,
+    USER_INTERACTION_TIMEOUT,
+)
 from src.core.haiku import (
     HaikuError,
     ImageDescriptionError,
@@ -40,16 +47,8 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-EMBED_COLOR_ERROR = 0xE91515
-EMBED_COLOR_INFO = 0x3498DB
-
-# Timeout constants (seconds)
-# User interaction timeout (how long user has to click/submit)
-USER_INTERACTION_TIMEOUT = 300.0  # 5 minutes
-# Extended timeout for result views where user may take time to decide
-RESULT_VIEW_TIMEOUT = 600.0  # 10 minutes
-# API timeout for image generation calls
-API_TIMEOUT_SECONDS = 180
+# Alias for backwards compatibility
+RESULT_VIEW_TIMEOUT = EXTENDED_USER_INTERACTION_TIMEOUT
 
 
 def get_user_info(user: dict[str, Any] | None) -> tuple[str, int, str]:

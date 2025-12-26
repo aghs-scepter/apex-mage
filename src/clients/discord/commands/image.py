@@ -9,6 +9,11 @@ from typing import TYPE_CHECKING, Any
 import discord
 from discord import app_commands
 
+from src.clients.discord.constants import (
+    API_TIMEOUT_SECONDS,
+    EXTENDED_USER_INTERACTION_TIMEOUT,
+    USER_INTERACTION_TIMEOUT,
+)
 from src.clients.discord.decorators import count_command
 from src.clients.discord.utils import create_embed_user, handle_text_overflow
 from src.clients.discord.views.carousel import (
@@ -35,14 +40,12 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Timeout constants
-# API timeout for image generation requests
-DEFAULT_API_TIMEOUT = 180.0
-# View timeout for user interaction (how long user has to submit/click)
-DEFAULT_USER_INTERACTION_TIMEOUT = 300.0  # 5 minutes
-# Legacy alias for backwards compatibility
+
+# Aliases for backwards compatibility with this module
+DEFAULT_API_TIMEOUT = float(API_TIMEOUT_SECONDS)
+DEFAULT_USER_INTERACTION_TIMEOUT = USER_INTERACTION_TIMEOUT
 DEFAULT_IMAGE_TIMEOUT = DEFAULT_API_TIMEOUT
-DEFAULT_EXTENDED_USER_INTERACTION_TIMEOUT = 600.0
+DEFAULT_EXTENDED_USER_INTERACTION_TIMEOUT = EXTENDED_USER_INTERACTION_TIMEOUT
 
 
 def register_image_commands(bot: "DiscordBot") -> None:
