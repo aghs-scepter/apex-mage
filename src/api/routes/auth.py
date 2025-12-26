@@ -107,15 +107,6 @@ def configure_api_key_repository(repository: ApiKeyRepositoryProtocol | None) ->
         logger.info("api_key_repository_configured", storage="memory")
 
 
-def _get_storage_mode() -> str:
-    """Get the current storage mode for API keys.
-
-    Returns:
-        'database' if using database storage, 'memory' otherwise.
-    """
-    return "database" if _api_key_repository is not None else "memory"
-
-
 def _warn_memory_mode() -> None:
     """Log a warning if using in-memory mode (only once)."""
     global _warned_about_memory_mode
