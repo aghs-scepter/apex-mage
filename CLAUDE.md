@@ -131,6 +131,8 @@ AI-powered conversational assistant with multi-channel support. Currently a Disc
 - No hardcoded credentials
 - Structured logging (JSON format)
 
+See [`docs/conventions.md`](docs/conventions.md) for detailed coding conventions.
+
 ## Build & Run
 
 ```bash
