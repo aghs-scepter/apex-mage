@@ -86,7 +86,8 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 _CREATE_BANS_TABLE = """
 CREATE TABLE IF NOT EXISTS bans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
+    user_id INTEGER UNIQUE NOT NULL,
+    username TEXT NOT NULL,
     reason TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -95,6 +96,7 @@ CREATE TABLE IF NOT EXISTS bans (
 _CREATE_BAN_HISTORY_TABLE = """
 CREATE TABLE IF NOT EXISTS ban_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
     username TEXT NOT NULL,
     action TEXT NOT NULL,
     reason TEXT,
@@ -141,6 +143,29 @@ CREATE TABLE IF NOT EXISTS prompt_refinements (
 );
 """
 
+_CREATE_WHITELIST_TABLE = """
+CREATE TABLE IF NOT EXISTS whitelist (
+    user_id INTEGER PRIMARY KEY,
+    username TEXT NOT NULL,
+    added_by TEXT NOT NULL,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    notes TEXT
+);
+"""
+
+_CREATE_USAGE_LOG_TABLE = """
+CREATE TABLE IF NOT EXISTS usage_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    guild_id INTEGER,
+    command_name TEXT NOT NULL,
+    command_type TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 _CREATE_PROMPT_REFINEMENTS_CHANNEL_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_prompt_refinements_channel_id
 ON prompt_refinements(channel_id);
@@ -164,6 +189,21 @@ ON search_rejections(channel_id);
 _CREATE_SEARCH_REJECTIONS_CREATED_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_search_rejections_created_at
 ON search_rejections(created_at);
+"""
+
+_CREATE_USAGE_LOG_USER_TYPE_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_usage_log_user_type
+ON usage_log(user_id, command_type);
+"""
+
+_CREATE_USAGE_LOG_GUILD_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_usage_log_guild
+ON usage_log(guild_id);
+"""
+
+_CREATE_USAGE_LOG_TIMESTAMP_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_usage_log_timestamp
+ON usage_log(timestamp);
 """
 
 # =============================================================================
@@ -401,25 +441,25 @@ WHERE key_hash = ?;
 """
 
 # Ban queries
-_SELECT_BAN_BY_USERNAME = """
-SELECT id, username, reason, created_at
+_SELECT_BAN_BY_USER_ID = """
+SELECT id, user_id, username, reason, created_at
 FROM bans
-WHERE username = ?;
+WHERE user_id = ?;
 """
 
 _INSERT_BAN = """
-INSERT INTO bans (username, reason)
-VALUES (?, ?);
+INSERT INTO bans (user_id, username, reason)
+VALUES (?, ?, ?);
 """
 
 _DELETE_BAN = """
 DELETE FROM bans
-WHERE username = ?;
+WHERE user_id = ?;
 """
 
 _INSERT_BAN_HISTORY = """
-INSERT INTO ban_history (username, action, reason, performed_by)
-VALUES (?, ?, ?, ?);
+INSERT INTO ban_history (user_id, username, action, reason, performed_by)
+VALUES (?, ?, ?, ?, ?);
 """
 
 # Behavior presets queries
@@ -478,6 +518,64 @@ SELECT
     SUM(CASE WHEN was_used = 1 THEN 1 ELSE 0 END) AS used_count
 FROM prompt_refinements
 GROUP BY refinement_type;
+"""
+
+# Whitelist queries
+_SELECT_WHITELIST_BY_USER_ID = """
+SELECT user_id, username, added_by, added_at, notes
+FROM whitelist
+WHERE user_id = ?;
+"""
+
+_INSERT_WHITELIST = """
+INSERT INTO whitelist (user_id, username, added_by, notes)
+VALUES (?, ?, ?, ?);
+"""
+
+_DELETE_WHITELIST = """
+DELETE FROM whitelist
+WHERE user_id = ?;
+"""
+
+_SELECT_ALL_WHITELIST = """
+SELECT user_id, username, added_by, added_at, notes
+FROM whitelist
+ORDER BY added_at DESC;
+"""
+
+# Usage log queries
+_INSERT_USAGE_LOG = """
+INSERT INTO usage_log (user_id, username, guild_id, command_name, command_type, outcome)
+VALUES (?, ?, ?, ?, ?, ?);
+"""
+
+_SELECT_TOP_USERS_BY_USAGE = """
+SELECT
+    user_id,
+    username,
+    SUM(CASE WHEN command_type = 'image' THEN 1 ELSE 0 END) as image_count,
+    SUM(CASE WHEN command_type = 'text' THEN 1 ELSE 0 END) as text_count,
+    (SUM(CASE WHEN command_type = 'image' THEN 1 ELSE 0 END) * 5) +
+    SUM(CASE WHEN command_type = 'text' THEN 1 ELSE 0 END) as score
+FROM usage_log
+WHERE (guild_id = ? OR ? IS NULL)
+GROUP BY user_id
+ORDER BY score DESC
+LIMIT ?;
+"""
+
+_SELECT_USER_USAGE_STATS = """
+SELECT
+    user_id,
+    username,
+    SUM(CASE WHEN command_type = 'image' THEN 1 ELSE 0 END) as image_count,
+    SUM(CASE WHEN command_type = 'text' THEN 1 ELSE 0 END) as text_count,
+    (SUM(CASE WHEN command_type = 'image' THEN 1 ELSE 0 END) * 5) +
+    SUM(CASE WHEN command_type = 'text' THEN 1 ELSE 0 END) as score
+FROM usage_log
+WHERE user_id = ?
+AND (guild_id = ? OR ? IS NULL)
+GROUP BY user_id;
 """
 
 
@@ -575,6 +673,11 @@ class SQLiteRepository:
             self._connection.execute(_CREATE_PROMPT_REFINEMENTS_TABLE)
             self._connection.execute(_CREATE_PROMPT_REFINEMENTS_CHANNEL_INDEX)
             self._connection.execute(_CREATE_PROMPT_REFINEMENTS_TYPE_INDEX)
+            self._connection.execute(_CREATE_WHITELIST_TABLE)
+            self._connection.execute(_CREATE_USAGE_LOG_TABLE)
+            self._connection.execute(_CREATE_USAGE_LOG_USER_TYPE_INDEX)
+            self._connection.execute(_CREATE_USAGE_LOG_GUILD_INDEX)
+            self._connection.execute(_CREATE_USAGE_LOG_TIMESTAMP_INDEX)
             self._connection.commit()
 
         await asyncio.to_thread(init_sync)
@@ -1092,11 +1195,11 @@ class SQLiteRepository:
     # BanRepository Implementation
     # =========================================================================
 
-    async def is_user_banned(self, username: str) -> bool:
+    async def is_user_banned(self, user_id: int) -> bool:
         """Check if a user is banned.
 
         Args:
-            username: The Discord username to check.
+            user_id: The Discord user ID to check.
 
         Returns:
             True if the user is banned, False otherwise.
@@ -1104,17 +1207,17 @@ class SQLiteRepository:
         conn = self._ensure_connected()
 
         def query_sync() -> sqlite3.Row | None:
-            cursor = conn.execute(_SELECT_BAN_BY_USERNAME, (username,))
+            cursor = conn.execute(_SELECT_BAN_BY_USER_ID, (user_id,))
             return cast(sqlite3.Row | None, cursor.fetchone())
 
         row = await asyncio.to_thread(query_sync)
         return row is not None
 
-    async def get_ban_reason(self, username: str) -> str | None:
+    async def get_ban_reason(self, user_id: int) -> str | None:
         """Get the ban reason for a user.
 
         Args:
-            username: The Discord username to check.
+            user_id: The Discord user ID to check.
 
         Returns:
             The ban reason if the user is banned, None otherwise.
@@ -1122,7 +1225,7 @@ class SQLiteRepository:
         conn = self._ensure_connected()
 
         def query_sync() -> sqlite3.Row | None:
-            cursor = conn.execute(_SELECT_BAN_BY_USERNAME, (username,))
+            cursor = conn.execute(_SELECT_BAN_BY_USER_ID, (user_id,))
             return cast(sqlite3.Row | None, cursor.fetchone())
 
         row = await asyncio.to_thread(query_sync)
@@ -1132,6 +1235,7 @@ class SQLiteRepository:
 
     async def add_ban(
         self,
+        user_id: int,
         username: str,
         reason: str,
         performed_by: str,
@@ -1139,7 +1243,8 @@ class SQLiteRepository:
         """Add a ban for a user.
 
         Args:
-            username: The Discord username to ban.
+            user_id: The Discord user ID to ban.
+            username: The Discord username (for display/audit purposes).
             reason: The reason for the ban.
             performed_by: The username of the person performing the ban.
 
@@ -1149,35 +1254,49 @@ class SQLiteRepository:
         conn = self._ensure_connected()
 
         def insert_sync() -> None:
-            conn.execute(_INSERT_BAN, (username, reason))
+            conn.execute(_INSERT_BAN, (user_id, username, reason))
             conn.execute(
                 _INSERT_BAN_HISTORY,
-                (username, "ban", reason, performed_by),
+                (user_id, username, "ban", reason, performed_by),
             )
             conn.commit()
 
         await asyncio.to_thread(insert_sync)
-        logger.info("user_banned", username=username, performed_by=performed_by, reason=reason)
+        logger.info(
+            "user_banned",
+            user_id=user_id,
+            username=username,
+            performed_by=performed_by,
+            reason=reason,
+        )
 
-    async def remove_ban(self, username: str, performed_by: str) -> None:
+    async def remove_ban(self, user_id: int, performed_by: str) -> None:
         """Remove a ban for a user.
 
         Args:
-            username: The Discord username to unban.
+            user_id: The Discord user ID to unban.
             performed_by: The username of the person performing the unban.
         """
         conn = self._ensure_connected()
 
+        # Get the username for the history record before deleting
+        def get_username_sync() -> str | None:
+            cursor = conn.execute(_SELECT_BAN_BY_USER_ID, (user_id,))
+            row = cursor.fetchone()
+            return row["username"] if row else None
+
+        username = await asyncio.to_thread(get_username_sync)
+
         def delete_sync() -> None:
-            conn.execute(_DELETE_BAN, (username,))
+            conn.execute(_DELETE_BAN, (user_id,))
             conn.execute(
                 _INSERT_BAN_HISTORY,
-                (username, "unban", None, performed_by),
+                (user_id, username or "unknown", "unban", None, performed_by),
             )
             conn.commit()
 
         await asyncio.to_thread(delete_sync)
-        logger.info("user_unbanned", username=username, performed_by=performed_by)
+        logger.info("user_unbanned", user_id=user_id, performed_by=performed_by)
 
     # =========================================================================
     # BehaviorPresetRepository Implementation
@@ -1431,3 +1550,226 @@ class SQLiteRepository:
             }
 
         return stats
+
+    # =========================================================================
+    # UsageLogRepository Implementation
+    # =========================================================================
+
+    async def log_command_usage(
+        self,
+        user_id: int,
+        username: str,
+        guild_id: int | None,
+        command_name: str,
+        command_type: str,
+        outcome: str,
+    ) -> None:
+        """Log a command usage event.
+
+        Records when a user invokes a command, its type, and outcome.
+        Used for usage analytics and top user leaderboards.
+
+        Args:
+            user_id: The Discord user ID who invoked the command.
+            username: The Discord username (for display/reporting).
+            guild_id: The Discord guild ID (None for DMs).
+            command_name: The command name (e.g., 'create_image', 'prompt').
+            command_type: The command type ('image' or 'text').
+            outcome: The outcome ('success', 'error', 'timeout', 'cancelled',
+                'rate_limited').
+        """
+        conn = self._ensure_connected()
+
+        def insert_sync() -> None:
+            conn.execute(
+                _INSERT_USAGE_LOG,
+                (user_id, username, guild_id, command_name, command_type, outcome),
+            )
+            conn.commit()
+
+        await asyncio.to_thread(insert_sync)
+        logger.debug(
+            f"Logged command usage: user={user_id}, command={command_name}, "
+            f"type={command_type}, outcome={outcome}"
+        )
+
+    async def get_top_users_by_usage(
+        self,
+        guild_id: int | None,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Get the top users by usage score.
+
+        Returns users ranked by score, where score = (image_count * 5) + text_count.
+        This weights image commands higher since they are more resource-intensive.
+
+        Args:
+            guild_id: The Discord guild ID to filter by (None for all guilds).
+            limit: Maximum number of users to return (default 5).
+
+        Returns:
+            List of dicts with keys: user_id, username, image_count, text_count, score.
+            Ordered by score descending.
+        """
+        conn = self._ensure_connected()
+
+        def query_sync() -> list[sqlite3.Row]:
+            cursor = conn.execute(
+                _SELECT_TOP_USERS_BY_USAGE,
+                (guild_id, guild_id, limit),
+            )
+            return cursor.fetchall()
+
+        rows = await asyncio.to_thread(query_sync)
+
+        return [
+            {
+                "user_id": row["user_id"],
+                "username": row["username"],
+                "image_count": row["image_count"],
+                "text_count": row["text_count"],
+                "score": row["score"],
+            }
+            for row in rows
+        ]
+
+    async def get_user_usage_stats(
+        self,
+        user_id: int,
+        guild_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Get usage statistics for a specific user.
+
+        Args:
+            user_id: The Discord user ID to get stats for.
+            guild_id: The Discord guild ID to filter by (None for all guilds).
+
+        Returns:
+            Dict with keys: user_id, username, image_count, text_count, score.
+            Returns None if the user has no usage records.
+        """
+        conn = self._ensure_connected()
+
+        def query_sync() -> sqlite3.Row | None:
+            cursor = conn.execute(
+                _SELECT_USER_USAGE_STATS,
+                (user_id, guild_id, guild_id),
+            )
+            return cast(sqlite3.Row | None, cursor.fetchone())
+
+        row = await asyncio.to_thread(query_sync)
+
+        if row is None:
+            return None
+
+        return {
+            "user_id": row["user_id"],
+            "username": row["username"],
+            "image_count": row["image_count"],
+            "text_count": row["text_count"],
+            "score": row["score"],
+        }
+
+    # =========================================================================
+    # WhitelistRepository Implementation
+    # =========================================================================
+
+    async def is_user_whitelisted(self, user_id: int) -> bool:
+        """Check if a user is whitelisted.
+
+        Args:
+            user_id: The Discord user ID to check.
+
+        Returns:
+            True if the user is whitelisted, False otherwise.
+        """
+        conn = self._ensure_connected()
+
+        def query_sync() -> sqlite3.Row | None:
+            cursor = conn.execute(_SELECT_WHITELIST_BY_USER_ID, (user_id,))
+            return cast(sqlite3.Row | None, cursor.fetchone())
+
+        row = await asyncio.to_thread(query_sync)
+        return row is not None
+
+    async def get_whitelist_entry(self, user_id: int) -> dict[str, Any] | None:
+        """Get a whitelist entry for a user.
+
+        Args:
+            user_id: The Discord user ID to check.
+
+        Returns:
+            The whitelist entry as a dictionary, or None if not found.
+        """
+        conn = self._ensure_connected()
+
+        def query_sync() -> sqlite3.Row | None:
+            cursor = conn.execute(_SELECT_WHITELIST_BY_USER_ID, (user_id,))
+            return cast(sqlite3.Row | None, cursor.fetchone())
+
+        row = await asyncio.to_thread(query_sync)
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    async def add_to_whitelist(
+        self,
+        user_id: int,
+        username: str,
+        added_by: str,
+        notes: str | None = None,
+    ) -> None:
+        """Add a user to the whitelist.
+
+        Args:
+            user_id: The Discord user ID to whitelist.
+            username: The Discord username (for display purposes).
+            added_by: Who whitelisted this user.
+            notes: Optional notes about the user.
+
+        Raises:
+            sqlite3.IntegrityError: If the user is already whitelisted.
+        """
+        conn = self._ensure_connected()
+
+        def insert_sync() -> None:
+            conn.execute(_INSERT_WHITELIST, (user_id, username, added_by, notes))
+            conn.commit()
+
+        await asyncio.to_thread(insert_sync)
+        logger.info(
+            "user_whitelisted",
+            user_id=user_id,
+            username=username,
+            added_by=added_by,
+        )
+
+    async def remove_from_whitelist(self, user_id: int) -> None:
+        """Remove a user from the whitelist.
+
+        Args:
+            user_id: The Discord user ID to remove.
+        """
+        conn = self._ensure_connected()
+
+        def delete_sync() -> None:
+            conn.execute(_DELETE_WHITELIST, (user_id,))
+            conn.commit()
+
+        await asyncio.to_thread(delete_sync)
+        logger.info("user_removed_from_whitelist", user_id=user_id)
+
+    async def list_whitelist(self) -> list[dict[str, Any]]:
+        """List all whitelisted users.
+
+        Returns:
+            List of whitelist entries as dictionaries, ordered by added_at desc.
+        """
+        conn = self._ensure_connected()
+
+        def query_sync() -> list[sqlite3.Row]:
+            cursor = conn.execute(_SELECT_ALL_WHITELIST)
+            return cursor.fetchall()
+
+        rows = await asyncio.to_thread(query_sync)
+        return [self._row_to_dict(row) for row in rows]

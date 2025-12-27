@@ -65,8 +65,8 @@ class MemoryRepository:
         self._api_keys: dict[str, ApiKey] = {}
         self._api_key_id_counter: int = 1
 
-        # Ban storage: username -> (reason, created_at)
-        self._bans: dict[str, tuple[str, datetime]] = {}
+        # Ban storage: user_id -> (username, reason, created_at)
+        self._bans: dict[int, tuple[str, str, datetime]] = {}
         self._ban_history: list[dict[str, Any]] = []
 
         # Behavior presets: (guild_id, name) -> preset dict
@@ -79,6 +79,13 @@ class MemoryRepository:
 
         # Prompt refinements: list of refinement records
         self._prompt_refinements: list[dict[str, Any]] = []
+
+        # Usage log: list of command usage records
+        self._usage_log: list[dict[str, Any]] = []
+        self._usage_log_id_counter: int = 1
+
+        # Whitelist storage: user_id -> whitelist entry dict
+        self._whitelist: dict[int, dict[str, Any]] = {}
 
     async def __aenter__(self) -> "MemoryRepository":
         """Async context manager entry: connect to the repository."""
@@ -600,35 +607,36 @@ class MemoryRepository:
     # BanRepository Implementation
     # =========================================================================
 
-    async def is_user_banned(self, username: str) -> bool:
+    async def is_user_banned(self, user_id: int) -> bool:
         """Check if a user is banned.
 
         Args:
-            username: The Discord username to check.
+            user_id: The Discord user ID to check.
 
         Returns:
             True if the user is banned, False otherwise.
         """
         self._ensure_connected()
-        return username in self._bans
+        return user_id in self._bans
 
-    async def get_ban_reason(self, username: str) -> str | None:
+    async def get_ban_reason(self, user_id: int) -> str | None:
         """Get the ban reason for a user.
 
         Args:
-            username: The Discord username to check.
+            user_id: The Discord user ID to check.
 
         Returns:
             The ban reason if the user is banned, None otherwise.
         """
         self._ensure_connected()
-        ban_info = self._bans.get(username)
+        ban_info = self._bans.get(user_id)
         if ban_info is None:
             return None
-        return ban_info[0]
+        return ban_info[1]  # (username, reason, created_at)
 
     async def add_ban(
         self,
+        user_id: int,
         username: str,
         reason: str,
         performed_by: str,
@@ -636,14 +644,16 @@ class MemoryRepository:
         """Add a ban for a user.
 
         Args:
-            username: The Discord username to ban.
+            user_id: The Discord user ID to ban.
+            username: The Discord username (for display/audit purposes).
             reason: The reason for the ban.
             performed_by: The username of the person performing the ban.
         """
         self._ensure_connected()
 
-        self._bans[username] = (reason, self._now())
+        self._bans[user_id] = (username, reason, self._now())
         self._ban_history.append({
+            "user_id": user_id,
             "username": username,
             "action": "ban",
             "reason": reason,
@@ -651,19 +661,22 @@ class MemoryRepository:
             "performed_at": self._now(),
         })
 
-    async def remove_ban(self, username: str, performed_by: str) -> None:
+    async def remove_ban(self, user_id: int, performed_by: str) -> None:
         """Remove a ban for a user.
 
         Args:
-            username: The Discord username to unban.
+            user_id: The Discord user ID to unban.
             performed_by: The username of the person performing the unban.
         """
         self._ensure_connected()
 
-        if username in self._bans:
-            del self._bans[username]
+        username = "unknown"
+        if user_id in self._bans:
+            username = self._bans[user_id][0]  # Get username from ban record
+            del self._bans[user_id]
 
         self._ban_history.append({
+            "user_id": user_id,
             "username": username,
             "action": "unban",
             "reason": None,
@@ -913,6 +926,215 @@ class MemoryRepository:
         return stats
 
     # =========================================================================
+    # UsageLogRepository Implementation
+    # =========================================================================
+
+    async def log_command_usage(
+        self,
+        user_id: int,
+        username: str,
+        guild_id: int | None,
+        command_name: str,
+        command_type: str,
+        outcome: str,
+    ) -> None:
+        """Log a command usage event.
+
+        Records when a user invokes a command, its type, and outcome.
+        Used for usage analytics and top user leaderboards.
+
+        Args:
+            user_id: The Discord user ID who invoked the command.
+            username: The Discord username (for display/reporting).
+            guild_id: The Discord guild ID (None for DMs).
+            command_name: The command name (e.g., 'create_image', 'prompt').
+            command_type: The command type ('image' or 'text').
+            outcome: The outcome ('success', 'error', 'timeout', 'cancelled',
+                'rate_limited').
+        """
+        self._ensure_connected()
+
+        self._usage_log.append({
+            "id": self._usage_log_id_counter,
+            "user_id": user_id,
+            "username": username,
+            "guild_id": guild_id,
+            "command_name": command_name,
+            "command_type": command_type,
+            "outcome": outcome,
+            "timestamp": self._now().isoformat(),
+        })
+        self._usage_log_id_counter += 1
+
+    async def get_top_users_by_usage(
+        self,
+        guild_id: int | None,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Get the top users by usage score.
+
+        Returns users ranked by score, where score = (image_count * 5) + text_count.
+        This weights image commands higher since they are more resource-intensive.
+
+        Args:
+            guild_id: The Discord guild ID to filter by (None for all guilds).
+            limit: Maximum number of users to return (default 5).
+
+        Returns:
+            List of dicts with keys: user_id, username, image_count, text_count, score.
+            Ordered by score descending.
+        """
+        self._ensure_connected()
+
+        # Aggregate by user
+        user_stats: dict[int, dict[str, Any]] = {}
+
+        for entry in self._usage_log:
+            # Filter by guild_id if specified
+            if guild_id is not None and entry["guild_id"] != guild_id:
+                continue
+
+            uid = entry["user_id"]
+            if uid not in user_stats:
+                user_stats[uid] = {
+                    "user_id": uid,
+                    "username": entry["username"],
+                    "image_count": 0,
+                    "text_count": 0,
+                }
+
+            if entry["command_type"] == "image":
+                user_stats[uid]["image_count"] += 1
+            else:
+                user_stats[uid]["text_count"] += 1
+
+        # Calculate scores and sort
+        result = list(user_stats.values())
+        for user in result:
+            user["score"] = (user["image_count"] * 5) + user["text_count"]
+
+        result.sort(key=lambda u: u["score"], reverse=True)
+        return result[:limit]
+
+    async def get_user_usage_stats(
+        self,
+        user_id: int,
+        guild_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Get usage statistics for a specific user.
+
+        Args:
+            user_id: The Discord user ID to get stats for.
+            guild_id: The Discord guild ID to filter by (None for all guilds).
+
+        Returns:
+            Dict with keys: user_id, username, image_count, text_count, score.
+            Returns None if the user has no usage records.
+        """
+        self._ensure_connected()
+
+        image_count = 0
+        text_count = 0
+        username = None
+
+        for entry in self._usage_log:
+            if entry["user_id"] != user_id:
+                continue
+            if guild_id is not None and entry["guild_id"] != guild_id:
+                continue
+
+            username = entry["username"]
+            if entry["command_type"] == "image":
+                image_count += 1
+            else:
+                text_count += 1
+
+        if username is None:
+            return None
+
+        return {
+            "user_id": user_id,
+            "username": username,
+            "image_count": image_count,
+            "text_count": text_count,
+            "score": (image_count * 5) + text_count,
+        }
+
+    # =========================================================================
+    # WhitelistRepository Implementation
+    # =========================================================================
+
+    async def is_user_whitelisted(self, user_id: int) -> bool:
+        """Check if a user is whitelisted.
+
+        Args:
+            user_id: The Discord user ID to check.
+
+        Returns:
+            True if the user is whitelisted, False otherwise.
+        """
+        self._ensure_connected()
+        return user_id in self._whitelist
+
+    async def get_whitelist_entry(self, user_id: int) -> dict[str, Any] | None:
+        """Get a whitelist entry for a user.
+
+        Args:
+            user_id: The Discord user ID to check.
+
+        Returns:
+            The whitelist entry as a dictionary, or None if not found.
+        """
+        self._ensure_connected()
+        return self._whitelist.get(user_id)
+
+    async def add_to_whitelist(
+        self,
+        user_id: int,
+        username: str,
+        added_by: str,
+        notes: str | None = None,
+    ) -> None:
+        """Add a user to the whitelist.
+
+        Args:
+            user_id: The Discord user ID to whitelist.
+            username: The Discord username (for display purposes).
+            added_by: Who whitelisted this user.
+            notes: Optional notes about the user.
+        """
+        self._ensure_connected()
+        self._whitelist[user_id] = {
+            "user_id": user_id,
+            "username": username,
+            "added_by": added_by,
+            "added_at": self._now().isoformat(),
+            "notes": notes,
+        }
+
+    async def remove_from_whitelist(self, user_id: int) -> None:
+        """Remove a user from the whitelist.
+
+        Args:
+            user_id: The Discord user ID to remove.
+        """
+        self._ensure_connected()
+        if user_id in self._whitelist:
+            del self._whitelist[user_id]
+
+    async def list_whitelist(self) -> list[dict[str, Any]]:
+        """List all whitelisted users.
+
+        Returns:
+            List of whitelist entries as dictionaries, ordered by added_at desc.
+        """
+        self._ensure_connected()
+        entries = list(self._whitelist.values())
+        # Sort by added_at descending
+        entries.sort(key=lambda e: e.get("added_at", ""), reverse=True)
+        return entries
+
+    # =========================================================================
     # Testing Utilities
     # =========================================================================
 
@@ -943,3 +1165,6 @@ class MemoryRepository:
         self._search_rejection_id_counter = 1
 
         self._prompt_refinements.clear()
+
+        self._usage_log.clear()
+        self._usage_log_id_counter = 1

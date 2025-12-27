@@ -497,30 +497,31 @@ class RepositoryAdapter:
     # Ban Management Methods
     # =========================================================================
 
-    async def is_user_banned(self, username: str) -> bool:
+    async def is_user_banned(self, user_id: int) -> bool:
         """Check if a user is banned.
 
         Args:
-            username: The Discord username to check.
+            user_id: The Discord user ID to check.
 
         Returns:
             True if the user is banned, False otherwise.
         """
-        return await self._repo.is_user_banned(username)
+        return await self._repo.is_user_banned(user_id)
 
-    async def get_ban_reason(self, username: str) -> str | None:
+    async def get_ban_reason(self, user_id: int) -> str | None:
         """Get the ban reason for a user.
 
         Args:
-            username: The Discord username to check.
+            user_id: The Discord user ID to check.
 
         Returns:
             The ban reason if the user is banned, None otherwise.
         """
-        return await self._repo.get_ban_reason(username)
+        return await self._repo.get_ban_reason(user_id)
 
     async def add_ban(
         self,
+        user_id: int,
         username: str,
         reason: str,
         performed_by: str,
@@ -528,20 +529,21 @@ class RepositoryAdapter:
         """Add a ban for a user.
 
         Args:
-            username: The Discord username to ban.
+            user_id: The Discord user ID to ban.
+            username: The Discord username (for display/audit purposes).
             reason: The reason for the ban.
             performed_by: The username of the person performing the ban.
         """
-        await self._repo.add_ban(username, reason, performed_by)
+        await self._repo.add_ban(user_id, username, reason, performed_by)
 
-    async def remove_ban(self, username: str, performed_by: str) -> None:
+    async def remove_ban(self, user_id: int, performed_by: str) -> None:
         """Remove a ban for a user.
 
         Args:
-            username: The Discord username to unban.
+            user_id: The Discord user ID to unban.
             performed_by: The username of the person performing the unban.
         """
-        await self._repo.remove_ban(username, performed_by)
+        await self._repo.remove_ban(user_id, performed_by)
 
     # =========================================================================
     # Preset Management Methods
@@ -678,3 +680,71 @@ class RepositoryAdapter:
             if isinstance(img, dict) and "source_url" in img:
                 source_urls.add(img["source_url"])
         return source_urls
+
+    # =========================================================================
+    # Usage Log Methods
+    # =========================================================================
+
+    async def log_command_usage(
+        self,
+        user_id: int,
+        username: str,
+        guild_id: int | None,
+        command_name: str,
+        command_type: str,
+        outcome: str,
+    ) -> None:
+        """Log a command usage event.
+
+        Records when a user invokes a command, its type, and outcome.
+        Used for usage analytics and top user leaderboards.
+
+        Args:
+            user_id: The Discord user ID who invoked the command.
+            username: The Discord username (for display/reporting).
+            guild_id: The Discord guild ID (None for DMs).
+            command_name: The command name (e.g., 'create_image', 'prompt').
+            command_type: The command type ('image' or 'text').
+            outcome: The outcome ('success', 'error', 'timeout', 'cancelled',
+                'rate_limited').
+        """
+        await self._repo.log_command_usage(
+            user_id, username, guild_id, command_name, command_type, outcome
+        )
+
+    async def get_top_users_by_usage(
+        self,
+        guild_id: int | None,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Get the top users by usage score.
+
+        Returns users ranked by score, where score = (image_count * 5) + text_count.
+        This weights image commands higher since they are more resource-intensive.
+
+        Args:
+            guild_id: The Discord guild ID to filter by (None for all guilds).
+            limit: Maximum number of users to return (default 5).
+
+        Returns:
+            List of dicts with keys: user_id, username, image_count, text_count, score.
+            Ordered by score descending.
+        """
+        return await self._repo.get_top_users_by_usage(guild_id, limit)
+
+    async def get_user_usage_stats(
+        self,
+        user_id: int,
+        guild_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Get usage statistics for a specific user.
+
+        Args:
+            user_id: The Discord user ID to get stats for.
+            guild_id: The Discord guild ID to filter by (None for all guilds).
+
+        Returns:
+            Dict with keys: user_id, username, image_count, text_count, score.
+            Returns None if the user has no usage records.
+        """
+        return await self._repo.get_user_usage_stats(user_id, guild_id)
