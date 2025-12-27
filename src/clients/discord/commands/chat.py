@@ -801,23 +801,41 @@ def register_chat_commands(bot: "DiscordBot") -> None:
         embed_user = create_embed_user(interaction)
 
         help_message = """
-    You can interact with the bot using the following commands:
+You can interact with the bot using the following commands:
 
-    ========================================
+========================================
 
-    `/prompt` - Submit a prompt and get a text response. You can include an image.
-    `/create_image` - Generate an image using the AI.
-    `/upload_image` - Upload an image to the bot.
-    `/modify_image` - Modify an image using the AI.
-    `/set_behavior custom` - Set a custom behavior prompt for the AI.
-    `/set_behavior preset` - Select a saved behavior preset.
-    `/clear` - Clear the bot's memory of the current channel, including images.
-    `/help` - Display this message.
+**Chat Commands**
+`/prompt` - Submit a prompt and get a text response. You can include an image.
+`/clear` - Clear the bot's memory of the current channel, including images.
+`/summarize` - Summarize conversation to reduce token usage.
 
-    ========================================
+**Image Commands**
+`/create_image` - Generate an image using the AI.
+`/upload_image` - Upload an image to the bot.
+`/modify_image` - Modify an image. Sources: Recent Images or Google Image search.
+`/describe_this` - Generate image description. Supports upload or Google Image search.
 
-    If you need help or have questions, please contact `@aghs` on Discord.
-    """
+**Behavior Settings**
+`/set_behavior custom` - Set a custom behavior prompt for the AI.
+`/set_behavior preset` - Select a saved behavior preset.
+
+**Behavior Presets**
+`/behavior_preset create` - Create a new behavior preset.
+`/behavior_preset edit` - Edit an existing preset.
+`/behavior_preset delete` - Delete a preset.
+`/behavior_preset list` - List all presets for the server.
+`/behavior_preset view` - View details of a preset.
+
+**User Commands**
+`/my_status` - Check your access status (whitelisted/banned).
+`/show_usage` - View usage statistics chart.
+`/help` - Display this message.
+
+========================================
+
+If you need help or have questions, please contact `@aghs` on Discord.
+"""
         help_view = InfoEmbedView(
             message=interaction.message,
             user=embed_user,
