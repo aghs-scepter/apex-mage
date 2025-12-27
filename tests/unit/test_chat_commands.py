@@ -92,6 +92,10 @@ def create_mock_bot() -> MagicMock:
     bot.repo.add_ban = AsyncMock()
     bot.repo.remove_ban = AsyncMock()
     bot.repo.get_ban_reason = AsyncMock(return_value=None)
+    bot.repo.is_user_whitelisted = AsyncMock(return_value=False)
+    bot.repo.add_to_whitelist = AsyncMock()
+    bot.repo.remove_from_whitelist = AsyncMock()
+    bot.repo.list_whitelist = AsyncMock(return_value=[])
     bot.repo.list_presets = AsyncMock(return_value=[])
     bot.repo.get_preset = AsyncMock(return_value=None)
     bot.repo.create_preset = AsyncMock()
@@ -986,3 +990,231 @@ class TestAutocomplete:
         results = await group._preset_name_autocomplete(interaction, "")
 
         assert results == []
+
+
+# --- Whitelist Command Tests ---
+
+
+class TestWhitelistCommands:
+    """Tests for /whitelist_add, /whitelist_remove, and /whitelist_list commands."""
+
+    @pytest.fixture
+    def whitelist_funcs(self) -> tuple:
+        """Get the whitelist command functions."""
+        bot = create_mock_bot()
+        commands: dict[str, Any] = {}
+
+        def capture_command(func=None, description=None, **kwargs):
+            if func is not None:
+                commands[func.__name__] = func
+                return func
+            return lambda f: (commands.update({f.__name__: f}), f)[1]
+
+        bot.tree.command = capture_command
+        register_chat_commands(bot)
+
+        return (
+            commands.get("whitelist_add"),
+            commands.get("whitelist_remove"),
+            commands.get("whitelist_list"),
+            bot,
+        )
+
+    @pytest.mark.asyncio
+    async def test_whitelist_add_requires_owner(self, whitelist_funcs: tuple) -> None:
+        """Test that /whitelist_add requires bot owner (aghs)."""
+        add_func, _remove_func, _list_func, _bot = whitelist_funcs
+        invoker = create_mock_user(name="NotAghs")
+        interaction = create_mock_interaction(user=invoker)
+        target_user = create_mock_user(name="someuser", user_id=999)
+
+        await add_func(interaction, user=target_user, notes=None)
+
+        interaction.response.send_message.assert_called_once()
+        assert "aghs" in interaction.response.send_message.call_args.args[0].lower()
+        assert interaction.response.send_message.call_args.kwargs["ephemeral"] is True
+
+    @pytest.mark.asyncio
+    async def test_whitelist_add_succeeds_for_owner(
+        self, whitelist_funcs: tuple
+    ) -> None:
+        """Test that /whitelist_add works for bot owner."""
+        add_func, _remove_func, _list_func, bot = whitelist_funcs
+        invoker = create_mock_user(name="aghs")
+        interaction = create_mock_interaction(user=invoker)
+        target_user = create_mock_user(name="newuser", user_id=999)
+
+        with patch(
+            "src.clients.discord.commands.chat.InfoEmbedView"
+        ) as mock_view_class:
+            mock_view = MagicMock()
+            mock_view.initialize = AsyncMock()
+            mock_view_class.return_value = mock_view
+
+            await add_func(interaction, user=target_user, notes="Test notes")
+
+            bot.repo.add_to_whitelist.assert_called_once_with(
+                999, "newuser", "aghs", "Test notes"
+            )
+
+    @pytest.mark.asyncio
+    async def test_whitelist_add_already_whitelisted(
+        self, whitelist_funcs: tuple
+    ) -> None:
+        """Test that /whitelist_add handles already whitelisted user."""
+        add_func, _remove_func, _list_func, bot = whitelist_funcs
+        invoker = create_mock_user(name="aghs")
+        interaction = create_mock_interaction(user=invoker)
+        target_user = create_mock_user(name="existinguser", user_id=999)
+
+        bot.repo.is_user_whitelisted.return_value = True
+
+        with patch(
+            "src.clients.discord.commands.chat.InfoEmbedView"
+        ) as mock_view_class:
+            mock_view = MagicMock()
+            mock_view.initialize = AsyncMock()
+            mock_view_class.return_value = mock_view
+
+            await add_func(interaction, user=target_user, notes=None)
+
+            # Should not call add_to_whitelist
+            bot.repo.add_to_whitelist.assert_not_called()
+            # Should show already whitelisted message
+            call_kwargs = mock_view_class.call_args.kwargs
+            assert "already whitelisted" in call_kwargs["description"].lower()
+
+    @pytest.mark.asyncio
+    async def test_whitelist_remove_requires_owner(
+        self, whitelist_funcs: tuple
+    ) -> None:
+        """Test that /whitelist_remove requires bot owner (aghs)."""
+        _add_func, remove_func, _list_func, _bot = whitelist_funcs
+        invoker = create_mock_user(name="NotAghs")
+        interaction = create_mock_interaction(user=invoker)
+        target_user = create_mock_user(name="someuser", user_id=999)
+
+        await remove_func(interaction, user=target_user)
+
+        interaction.response.send_message.assert_called_once()
+        assert "aghs" in interaction.response.send_message.call_args.args[0].lower()
+        assert interaction.response.send_message.call_args.kwargs["ephemeral"] is True
+
+    @pytest.mark.asyncio
+    async def test_whitelist_remove_succeeds_for_owner(
+        self, whitelist_funcs: tuple
+    ) -> None:
+        """Test that /whitelist_remove works for bot owner."""
+        _add_func, remove_func, _list_func, bot = whitelist_funcs
+        invoker = create_mock_user(name="aghs")
+        interaction = create_mock_interaction(user=invoker)
+        target_user = create_mock_user(name="existinguser", user_id=999)
+
+        bot.repo.is_user_whitelisted.return_value = True
+
+        with patch(
+            "src.clients.discord.commands.chat.InfoEmbedView"
+        ) as mock_view_class:
+            mock_view = MagicMock()
+            mock_view.initialize = AsyncMock()
+            mock_view_class.return_value = mock_view
+
+            await remove_func(interaction, user=target_user)
+
+            bot.repo.remove_from_whitelist.assert_called_once_with(999)
+
+    @pytest.mark.asyncio
+    async def test_whitelist_remove_not_whitelisted(
+        self, whitelist_funcs: tuple
+    ) -> None:
+        """Test that /whitelist_remove handles non-whitelisted user."""
+        _add_func, remove_func, _list_func, bot = whitelist_funcs
+        invoker = create_mock_user(name="aghs")
+        interaction = create_mock_interaction(user=invoker)
+        target_user = create_mock_user(name="unknownuser", user_id=999)
+
+        bot.repo.is_user_whitelisted.return_value = False
+
+        with patch(
+            "src.clients.discord.commands.chat.InfoEmbedView"
+        ) as mock_view_class:
+            mock_view = MagicMock()
+            mock_view.initialize = AsyncMock()
+            mock_view_class.return_value = mock_view
+
+            await remove_func(interaction, user=target_user)
+
+            # Should not call remove_from_whitelist
+            bot.repo.remove_from_whitelist.assert_not_called()
+            # Should show not whitelisted message
+            call_kwargs = mock_view_class.call_args.kwargs
+            assert "not currently whitelisted" in call_kwargs["description"].lower()
+
+    @pytest.mark.asyncio
+    async def test_whitelist_list_requires_owner(
+        self, whitelist_funcs: tuple
+    ) -> None:
+        """Test that /whitelist_list requires bot owner (aghs)."""
+        _add_func, _remove_func, list_func, _bot = whitelist_funcs
+        invoker = create_mock_user(name="NotAghs")
+        interaction = create_mock_interaction(user=invoker)
+
+        await list_func(interaction)
+
+        interaction.response.send_message.assert_called_once()
+        assert "aghs" in interaction.response.send_message.call_args.args[0].lower()
+        assert interaction.response.send_message.call_args.kwargs["ephemeral"] is True
+
+    @pytest.mark.asyncio
+    async def test_whitelist_list_shows_empty_message(
+        self, whitelist_funcs: tuple
+    ) -> None:
+        """Test that /whitelist_list shows message when whitelist is empty."""
+        _add_func, _remove_func, list_func, bot = whitelist_funcs
+        invoker = create_mock_user(name="aghs")
+        interaction = create_mock_interaction(user=invoker)
+
+        bot.repo.list_whitelist.return_value = []
+
+        with patch(
+            "src.clients.discord.commands.chat.InfoEmbedView"
+        ) as mock_view_class:
+            mock_view = MagicMock()
+            mock_view.initialize = AsyncMock()
+            mock_view_class.return_value = mock_view
+
+            await list_func(interaction)
+
+            call_kwargs = mock_view_class.call_args.kwargs
+            assert "no users" in call_kwargs["description"].lower()
+
+    @pytest.mark.asyncio
+    async def test_whitelist_list_shows_users(self, whitelist_funcs: tuple) -> None:
+        """Test that /whitelist_list shows whitelisted users."""
+        _add_func, _remove_func, list_func, bot = whitelist_funcs
+        invoker = create_mock_user(name="aghs")
+        interaction = create_mock_interaction(user=invoker)
+
+        bot.repo.list_whitelist.return_value = [
+            {
+                "user_id": 123,
+                "username": "User1",
+                "added_by": "aghs",
+                "added_at": "2024-01-01 12:00:00",
+                "notes": "Test note",
+            },
+            {
+                "user_id": 456,
+                "username": "User2",
+                "added_by": "aghs",
+                "added_at": "2024-01-02 12:00:00",
+                "notes": None,
+            },
+        ]
+
+        await list_func(interaction)
+
+        interaction.followup.send.assert_called_once()
+        # Check that an embed was sent
+        call_kwargs = interaction.followup.send.call_args.kwargs
+        assert "embed" in call_kwargs

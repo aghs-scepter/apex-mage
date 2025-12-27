@@ -1282,6 +1282,214 @@ def register_chat_commands(bot: "DiscordBot") -> None:
         )
         await info_view.initialize(interaction)
 
+    @bot.tree.command(
+        description="Add a user to the whitelist. Only aghs can use this command."
+    )
+    @app_commands.describe(
+        user="Discord user to add to whitelist",
+        notes="Optional notes about this user",
+    )
+    async def whitelist_add(
+        interaction: discord.Interaction,
+        user: discord.User,
+        notes: str | None = None,
+    ) -> None:
+        """Add a user to the whitelist. Only aghs can use this command.
+
+        Args:
+            interaction: The Discord interaction.
+            user: The Discord user to whitelist.
+            notes: Optional notes about this user.
+        """
+        # Check if invoker is the bot owner
+        if interaction.user.name != "aghs":
+            await interaction.response.send_message(
+                "Only aghs can add users to the whitelist.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        embed_user = create_embed_user(interaction)
+
+        # Check if user is already whitelisted
+        is_whitelisted = await bot.repo.is_user_whitelisted(user.id)
+
+        if is_whitelisted:
+            info_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Whitelist",
+                description=f"User {user.name} is already whitelisted.",
+                is_error=False,
+            )
+            await info_view.initialize(interaction)
+            return
+
+        # Add to whitelist
+        await bot.repo.add_to_whitelist(
+            user.id, user.name, interaction.user.name, notes
+        )
+
+        notes_display = [{"name": "User", "value": f"{user.name} ({user.id})"}]
+        if notes:
+            notes_display.append({"name": "Notes", "value": notes})
+
+        info_view = InfoEmbedView(
+            message=interaction.message,
+            user=embed_user,
+            title="User Whitelisted",
+            description=f"User {user.name} has been added to the whitelist.",
+            is_error=False,
+            notes=notes_display,
+        )
+        await info_view.initialize(interaction)
+
+    @bot.tree.command(
+        description="Remove a user from the whitelist. Only aghs can use this command."
+    )
+    @app_commands.describe(user="Discord user to remove from whitelist")
+    async def whitelist_remove(
+        interaction: discord.Interaction,
+        user: discord.User,
+    ) -> None:
+        """Remove a user from the whitelist. Only aghs can use this command.
+
+        Args:
+            interaction: The Discord interaction.
+            user: The Discord user to remove from whitelist.
+        """
+        # Check if invoker is the bot owner
+        if interaction.user.name != "aghs":
+            await interaction.response.send_message(
+                "Only aghs can remove users from the whitelist.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        embed_user = create_embed_user(interaction)
+
+        # Check if user is actually whitelisted
+        is_whitelisted = await bot.repo.is_user_whitelisted(user.id)
+
+        if not is_whitelisted:
+            info_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Whitelist",
+                description=f"User {user.name} is not currently whitelisted.",
+                is_error=False,
+            )
+            await info_view.initialize(interaction)
+            return
+
+        # Remove from whitelist
+        await bot.repo.remove_from_whitelist(user.id)
+
+        info_view = InfoEmbedView(
+            message=interaction.message,
+            user=embed_user,
+            title="User Removed from Whitelist",
+            description=f"User {user.name} has been removed from the whitelist.",
+            is_error=False,
+        )
+        await info_view.initialize(interaction)
+
+    @bot.tree.command(
+        description="List all whitelisted users. Only aghs can use this command."
+    )
+    async def whitelist_list(interaction: discord.Interaction) -> None:
+        """List all whitelisted users. Only aghs can use this command.
+
+        Args:
+            interaction: The Discord interaction.
+        """
+        # Check if invoker is the bot owner
+        if interaction.user.name != "aghs":
+            await interaction.response.send_message(
+                "Only aghs can view the whitelist.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+
+        embed_user = create_embed_user(interaction)
+
+        # Get all whitelisted users
+        whitelist = await bot.repo.list_whitelist()
+
+        if not whitelist:
+            info_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Whitelist",
+                description="No users are currently whitelisted.",
+                is_error=False,
+            )
+            await info_view.initialize(interaction)
+            return
+
+        # Build embed with whitelist
+        embed = discord.Embed(title="Whitelisted Users", color=0x3498DB)
+
+        for entry in whitelist:
+            # Format each entry
+            notes = entry.get("notes") or "No notes"
+            added_at = entry.get("added_at", "Unknown")
+            embed.add_field(
+                name=f"{entry['username']} ({entry['user_id']})",
+                value=f"Added by: {entry['added_by']}\nAdded: {added_at}\nNotes: {notes}",
+                inline=False,
+            )
+
+        # Show count in footer
+        embed.set_footer(text=f"Total: {len(whitelist)} user(s)")
+
+        await interaction.followup.send(embed=embed)
+
+    @bot.tree.command(  # type: ignore[arg-type]
+        description="Check your access status (available to everyone)."
+    )
+    async def my_status(interaction: discord.Interaction) -> None:
+        """Check your own access status (whitelisted, not whitelisted, or banned).
+
+        This command is available to everyone and bypasses the whitelist check.
+
+        Args:
+            interaction: The Discord interaction.
+        """
+        user_id = interaction.user.id
+
+        # Check ban status first (ban takes precedence)
+        is_banned = await bot.repo.is_user_banned(user_id)
+
+        if is_banned:
+            reason = await bot.repo.get_ban_reason(user_id)
+            reason_text = reason if reason else "No reason provided"
+            await interaction.response.send_message(
+                f"Banned: {reason_text}",
+                ephemeral=True,
+            )
+            return
+
+        # Check whitelist status
+        is_whitelisted = await bot.repo.is_user_whitelisted(user_id)
+
+        if is_whitelisted:
+            await interaction.response.send_message(
+                "Whitelisted",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                "Not whitelisted. Contact @aghs for access.",
+                ephemeral=True,
+            )
+
     @bot.tree.command(  # type: ignore[arg-type]
         description="Summarize the current conversation context to reduce token usage."
     )
