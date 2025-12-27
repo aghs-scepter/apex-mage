@@ -1183,19 +1183,19 @@ def register_chat_commands(bot: "DiscordBot") -> None:
         description="Ban a user from using the bot. Only aghs can use this command."
     )
     @app_commands.describe(
-        username="Discord username to ban",
+        user="Discord user to ban",
         reason="Reason for the ban",
     )
     async def ban_user(
         interaction: discord.Interaction,
-        username: str,
+        user: discord.User,
         reason: str,
     ) -> None:
         """Ban a user from using the bot. Only aghs can use this command.
 
         Args:
             interaction: The Discord interaction.
-            username: The Discord username to ban.
+            user: The Discord user to ban.
             reason: The reason for the ban.
         """
         # Check if invoker is the bot owner
@@ -1211,13 +1211,13 @@ def register_chat_commands(bot: "DiscordBot") -> None:
         embed_user = create_embed_user(interaction)
 
         try:
-            await bot.repo.add_ban(username, reason, interaction.user.name)
+            await bot.repo.add_ban(user.id, user.name, reason, interaction.user.name)
 
             info_view = InfoEmbedView(
                 message=interaction.message,
                 user=embed_user,
                 title="User Banned",
-                description=f"User {username} has been banned. Reason: {reason}",
+                description=f"User {user.name} (ID: {user.id}) has been banned. Reason: {reason}",
                 is_error=False,
             )
             await info_view.initialize(interaction)
@@ -1228,7 +1228,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                 message=interaction.message,
                 user=embed_user,
                 title="Ban User",
-                description=f"User {username} is already banned.",
+                description=f"User {user.name} is already banned.",
                 is_error=False,
             )
             await info_view.initialize(interaction)
@@ -1236,13 +1236,13 @@ def register_chat_commands(bot: "DiscordBot") -> None:
     @bot.tree.command(
         description="Unban a user from the bot. Only aghs can use this command."
     )
-    @app_commands.describe(username="Discord username to unban")
-    async def unban_user(interaction: discord.Interaction, username: str) -> None:
+    @app_commands.describe(user="Discord user to unban")
+    async def unban_user(interaction: discord.Interaction, user: discord.User) -> None:
         """Unban a user from the bot. Only aghs can use this command.
 
         Args:
             interaction: The Discord interaction.
-            username: The Discord username to unban.
+            user: The Discord user to unban.
         """
         # Check if invoker is the bot owner
         if interaction.user.name != "aghs":
@@ -1257,27 +1257,27 @@ def register_chat_commands(bot: "DiscordBot") -> None:
         embed_user = create_embed_user(interaction)
 
         # Check if user is actually banned
-        is_banned = await bot.repo.is_user_banned(username)
+        is_banned = await bot.repo.is_user_banned(user.id)
 
         if not is_banned:
             info_view = InfoEmbedView(
                 message=interaction.message,
                 user=embed_user,
                 title="Unban User",
-                description=f"User {username} is not currently banned.",
+                description=f"User {user.name} is not currently banned.",
                 is_error=False,
             )
             await info_view.initialize(interaction)
             return
 
         # Remove the ban
-        await bot.repo.remove_ban(username, interaction.user.name)
+        await bot.repo.remove_ban(user.id, interaction.user.name)
 
         info_view = InfoEmbedView(
             message=interaction.message,
             user=embed_user,
             title="User Unbanned",
-            description=f"User {username} has been unbanned.",
+            description=f"User {user.name} has been unbanned.",
             is_error=False,
         )
         await info_view.initialize(interaction)

@@ -839,10 +839,11 @@ class TestBanCommands:
     async def test_ban_user_requires_owner(self, ban_funcs: tuple) -> None:
         """Test that /ban_user requires bot owner (aghs)."""
         ban_func, _unban_func, _bot = ban_funcs
-        user = create_mock_user(name="NotAghs")
-        interaction = create_mock_interaction(user=user)
+        invoker = create_mock_user(name="NotAghs")
+        interaction = create_mock_interaction(user=invoker)
+        target_user = create_mock_user(name="someuser", user_id=999)
 
-        await ban_func(interaction, username="someuser", reason="spam")
+        await ban_func(interaction, user=target_user, reason="spam")
 
         interaction.response.send_message.assert_called_once()
         assert "aghs" in interaction.response.send_message.call_args.args[0].lower()
@@ -852,8 +853,9 @@ class TestBanCommands:
     async def test_ban_user_succeeds_for_owner(self, ban_funcs: tuple) -> None:
         """Test that /ban_user works for bot owner."""
         ban_func, _unban_func, bot = ban_funcs
-        user = create_mock_user(name="aghs")
-        interaction = create_mock_interaction(user=user)
+        invoker = create_mock_user(name="aghs")
+        interaction = create_mock_interaction(user=invoker)
+        target_user = create_mock_user(name="spammer", user_id=999)
 
         with patch(
             "src.clients.discord.commands.chat.InfoEmbedView"
@@ -862,18 +864,19 @@ class TestBanCommands:
             mock_view.initialize = AsyncMock()
             mock_view_class.return_value = mock_view
 
-            await ban_func(interaction, username="spammer", reason="spam")
+            await ban_func(interaction, user=target_user, reason="spam")
 
-            bot.repo.add_ban.assert_called_once_with("spammer", "spam", "aghs")
+            bot.repo.add_ban.assert_called_once_with(999, "spammer", "spam", "aghs")
 
     @pytest.mark.asyncio
     async def test_unban_user_requires_owner(self, ban_funcs: tuple) -> None:
         """Test that /unban_user requires bot owner (aghs)."""
         _ban_func, unban_func, _bot = ban_funcs
-        user = create_mock_user(name="NotAghs")
-        interaction = create_mock_interaction(user=user)
+        invoker = create_mock_user(name="NotAghs")
+        interaction = create_mock_interaction(user=invoker)
+        target_user = create_mock_user(name="someuser", user_id=999)
 
-        await unban_func(interaction, username="someuser")
+        await unban_func(interaction, user=target_user)
 
         interaction.response.send_message.assert_called_once()
         assert "aghs" in interaction.response.send_message.call_args.args[0].lower()

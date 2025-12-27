@@ -35,14 +35,15 @@ class BanCheckCommandTree(app_commands.CommandTree["DiscordBot"]):
         """
         # Get the bot instance from the client
         bot = interaction.client
+        user_id = interaction.user.id
         username = interaction.user.name
 
         # Check if user is banned
-        is_banned = await bot.repo.is_user_banned(username)
+        is_banned = await bot.repo.is_user_banned(user_id)
 
         if is_banned:
             # Get the ban reason
-            reason = await bot.repo.get_ban_reason(username)
+            reason = await bot.repo.get_ban_reason(user_id)
             reason_text = reason if reason else "No reason provided"
 
             # Send visible message (not ephemeral) so it stays in chat

@@ -57,7 +57,7 @@ class TestBanCheckCommandTree:
 
         # Should return True (allow command)
         assert result is True
-        mock_bot.repo.is_user_banned.assert_called_once_with("testuser")
+        mock_bot.repo.is_user_banned.assert_called_once_with(123456789)
         mock_interaction.response.send_message.assert_not_called()
 
     @pytest.mark.asyncio
@@ -72,8 +72,8 @@ class TestBanCheckCommandTree:
 
         # Should return False (block command)
         assert result is False
-        mock_bot.repo.is_user_banned.assert_called_once_with("testuser")
-        mock_bot.repo.get_ban_reason.assert_called_once_with("testuser")
+        mock_bot.repo.is_user_banned.assert_called_once_with(123456789)
+        mock_bot.repo.get_ban_reason.assert_called_once_with(123456789)
 
         # Should send a visible (not ephemeral) message
         mock_interaction.response.send_message.assert_called_once_with(
@@ -101,17 +101,18 @@ class TestBanCheckCommandTree:
         )
 
     @pytest.mark.asyncio
-    async def test_ban_check_uses_username_not_display_name(
+    async def test_ban_check_uses_user_id_not_username(
         self, mock_bot: MagicMock, mock_interaction: MagicMock, command_tree: BanCheckCommandTree
     ) -> None:
-        """Test that the check uses the user's username (not display name)."""
+        """Test that the check uses the user's ID (not username)."""
         mock_bot.repo.is_user_banned.return_value = False
 
         # Set a different display_name vs username
         mock_interaction.user.name = "actual_username"
         mock_interaction.user.display_name = "Fancy Display Name"
+        mock_interaction.user.id = 987654321
 
         await command_tree.interaction_check(mock_interaction)
 
-        # Should use .name, not .display_name
-        mock_bot.repo.is_user_banned.assert_called_once_with("actual_username")
+        # Should use .id, not .name
+        mock_bot.repo.is_user_banned.assert_called_once_with(987654321)

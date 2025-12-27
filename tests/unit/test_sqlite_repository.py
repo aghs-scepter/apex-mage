@@ -1086,60 +1086,62 @@ class TestBanRepository:
         self, repo: SQLiteRepository
     ) -> None:
         """Test that is_user_banned returns False for non-banned user."""
-        result = await repo.is_user_banned("innocent_user")
+        result = await repo.is_user_banned(123456789)
         assert result is False
 
     async def test_is_user_banned_when_banned(
         self, repo: SQLiteRepository
     ) -> None:
         """Test that is_user_banned returns True for banned user."""
-        await repo.add_ban("bad_user", "Testing ban", "admin")
+        await repo.add_ban(123456789, "bad_user", "Testing ban", "admin")
 
-        result = await repo.is_user_banned("bad_user")
+        result = await repo.is_user_banned(123456789)
         assert result is True
 
     async def test_get_ban_reason_when_not_banned(
         self, repo: SQLiteRepository
     ) -> None:
         """Test that get_ban_reason returns None for non-banned user."""
-        result = await repo.get_ban_reason("innocent_user")
+        result = await repo.get_ban_reason(123456789)
         assert result is None
 
     async def test_get_ban_reason_when_banned(
         self, repo: SQLiteRepository
     ) -> None:
         """Test that get_ban_reason returns the reason for banned user."""
-        await repo.add_ban("bad_user", "Spamming the chat", "admin")
+        await repo.add_ban(123456789, "bad_user", "Spamming the chat", "admin")
 
-        result = await repo.get_ban_reason("bad_user")
+        result = await repo.get_ban_reason(123456789)
         assert result == "Spamming the chat"
 
     async def test_add_ban_creates_ban_record(
         self, repo: SQLiteRepository
     ) -> None:
         """Test that add_ban creates a ban record."""
-        await repo.add_ban("test_user", "Test reason", "moderator")
+        await repo.add_ban(123456789, "test_user", "Test reason", "moderator")
 
-        is_banned = await repo.is_user_banned("test_user")
+        is_banned = await repo.is_user_banned(123456789)
         assert is_banned is True
 
-        reason = await repo.get_ban_reason("test_user")
+        reason = await repo.get_ban_reason(123456789)
         assert reason == "Test reason"
 
     async def test_add_ban_creates_history_record(
         self, repo: SQLiteRepository
     ) -> None:
         """Test that add_ban creates a ban_history record."""
-        await repo.add_ban("test_user", "Test reason", "moderator")
+        await repo.add_ban(123456789, "test_user", "Test reason", "moderator")
 
         # Verify history record was created
         conn = repo._ensure_connected()
         cursor = conn.execute(
-            "SELECT * FROM ban_history WHERE username = ?",
-            ("test_user",),
+            "SELECT * FROM ban_history WHERE user_id = ?",
+            (123456789,),
         )
         row = cursor.fetchone()
         assert row is not None
+        assert row["user_id"] == 123456789
+        assert row["username"] == "test_user"
         assert row["action"] == "ban"
         assert row["reason"] == "Test reason"
         assert row["performed_by"] == "moderator"
@@ -1150,38 +1152,40 @@ class TestBanRepository:
         """Test that banning an already banned user raises an error."""
         import sqlite3
 
-        await repo.add_ban("test_user", "First ban", "admin")
+        await repo.add_ban(123456789, "test_user", "First ban", "admin")
 
         with pytest.raises(sqlite3.IntegrityError):
-            await repo.add_ban("test_user", "Second ban", "admin")
+            await repo.add_ban(123456789, "test_user", "Second ban", "admin")
 
     async def test_remove_ban_removes_ban_record(
         self, repo: SQLiteRepository
     ) -> None:
         """Test that remove_ban removes the ban record."""
-        await repo.add_ban("test_user", "Test reason", "admin")
-        assert await repo.is_user_banned("test_user") is True
+        await repo.add_ban(123456789, "test_user", "Test reason", "admin")
+        assert await repo.is_user_banned(123456789) is True
 
-        await repo.remove_ban("test_user", "admin")
+        await repo.remove_ban(123456789, "admin")
 
-        is_banned = await repo.is_user_banned("test_user")
+        is_banned = await repo.is_user_banned(123456789)
         assert is_banned is False
 
     async def test_remove_ban_creates_history_record(
         self, repo: SQLiteRepository
     ) -> None:
         """Test that remove_ban creates a ban_history record."""
-        await repo.add_ban("test_user", "Test reason", "admin")
-        await repo.remove_ban("test_user", "moderator")
+        await repo.add_ban(123456789, "test_user", "Test reason", "admin")
+        await repo.remove_ban(123456789, "moderator")
 
         # Verify history record was created for unban
         conn = repo._ensure_connected()
         cursor = conn.execute(
-            "SELECT * FROM ban_history WHERE username = ? AND action = ?",
-            ("test_user", "unban"),
+            "SELECT * FROM ban_history WHERE user_id = ? AND action = ?",
+            (123456789, "unban"),
         )
         row = cursor.fetchone()
         assert row is not None
+        assert row["user_id"] == 123456789
+        assert row["username"] == "test_user"
         assert row["action"] == "unban"
         assert row["reason"] is None
         assert row["performed_by"] == "moderator"
@@ -1191,23 +1195,22 @@ class TestBanRepository:
     ) -> None:
         """Test that removing a ban for non-banned user doesn't raise an error."""
         # This should complete without raising
-        await repo.remove_ban("not_banned_user", "admin")
+        await repo.remove_ban(999999999, "admin")
 
         # Verify user is still not banned
-        is_banned = await repo.is_user_banned("not_banned_user")
+        is_banned = await repo.is_user_banned(999999999)
         assert is_banned is False
 
-    async def test_ban_username_case_sensitivity(
+    async def test_ban_user_id_uniqueness(
         self, repo: SQLiteRepository
     ) -> None:
-        """Test that usernames are case-sensitive for bans."""
-        await repo.add_ban("TestUser", "Test reason", "admin")
+        """Test that user_id is unique for bans."""
+        await repo.add_ban(123456789, "test_user", "Test reason", "admin")
 
-        # Exact match should be banned
-        assert await repo.is_user_banned("TestUser") is True
-        # Different case should NOT be banned (SQLite default is case-sensitive)
-        assert await repo.is_user_banned("testuser") is False
-        assert await repo.is_user_banned("TESTUSER") is False
+        # Same user_id should be banned
+        assert await repo.is_user_banned(123456789) is True
+        # Different user_id should NOT be banned
+        assert await repo.is_user_banned(987654321) is False
 
 
 class TestBehaviorPresetRepository:
