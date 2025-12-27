@@ -1336,3 +1336,216 @@ class TestMyStatusCommand:
 
         bot.repo.is_user_banned.assert_called_once_with(42)
         bot.repo.is_user_whitelisted.assert_called_once_with(42)
+
+
+# --- Show Usage Command Tests ---
+
+
+class TestShowUsageCommand:
+    """Tests for /show_usage command."""
+
+    @pytest.fixture
+    def show_usage_func(self) -> tuple:
+        """Get the show_usage command function."""
+        bot = create_mock_bot()
+        # Add get_top_users_by_usage mock
+        bot.repo.get_top_users_by_usage = AsyncMock(return_value=[])
+        commands: dict[str, Any] = {}
+
+        def capture_command(description=None, **kwargs):
+            def decorator(func):
+                commands[func.__name__] = func
+                return func
+            return decorator
+
+        bot.tree.command = capture_command
+        register_chat_commands(bot)
+
+        return commands.get("show_usage"), bot
+
+    @pytest.mark.asyncio
+    async def test_show_usage_defers_response(self, show_usage_func: tuple) -> None:
+        """Test that /show_usage defers response first."""
+        func, _bot = show_usage_func
+        interaction = create_mock_interaction()
+
+        with patch(
+            "src.clients.discord.commands.chat.generate_usage_chart"
+        ) as mock_chart:
+            mock_chart.return_value = b"\x89PNG\r\n\x1a\n"  # PNG header
+
+            await func(interaction)
+
+            interaction.response.defer.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_show_usage_uses_guild_id_when_server_only(
+        self, show_usage_func: tuple
+    ) -> None:
+        """Test that /show_usage passes guild_id when server_only=True."""
+        func, bot = show_usage_func
+        interaction = create_mock_interaction(guild_id=12345)
+
+        with patch(
+            "src.clients.discord.commands.chat.generate_usage_chart"
+        ) as mock_chart:
+            mock_chart.return_value = b"\x89PNG\r\n\x1a\n"
+
+            await func(interaction, server_only=True)
+
+            bot.repo.get_top_users_by_usage.assert_called_once_with(12345, limit=5)
+
+    @pytest.mark.asyncio
+    async def test_show_usage_uses_none_when_not_server_only(
+        self, show_usage_func: tuple
+    ) -> None:
+        """Test that /show_usage passes None when server_only=False."""
+        func, bot = show_usage_func
+        interaction = create_mock_interaction(guild_id=12345)
+
+        with patch(
+            "src.clients.discord.commands.chat.generate_usage_chart"
+        ) as mock_chart:
+            mock_chart.return_value = b"\x89PNG\r\n\x1a\n"
+
+            await func(interaction, server_only=False)
+
+            bot.repo.get_top_users_by_usage.assert_called_once_with(None, limit=5)
+
+    @pytest.mark.asyncio
+    async def test_show_usage_generates_chart(self, show_usage_func: tuple) -> None:
+        """Test that /show_usage calls generate_usage_chart with stats."""
+        func, bot = show_usage_func
+        mock_stats = [
+            {"user_id": 123, "username": "Alice", "image_count": 10, "text_count": 50, "total_score": 100}
+        ]
+        bot.repo.get_top_users_by_usage.return_value = mock_stats
+        interaction = create_mock_interaction()
+
+        with patch(
+            "src.clients.discord.commands.chat.generate_usage_chart"
+        ) as mock_chart:
+            mock_chart.return_value = b"\x89PNG\r\n\x1a\n"
+
+            await func(interaction)
+
+            mock_chart.assert_called_once()
+            call_args = mock_chart.call_args
+            assert call_args[0][0] == mock_stats
+
+    @pytest.mark.asyncio
+    async def test_show_usage_sends_embed_with_file(
+        self, show_usage_func: tuple
+    ) -> None:
+        """Test that /show_usage sends embed with file attachment."""
+        func, _bot = show_usage_func
+        interaction = create_mock_interaction()
+
+        with patch(
+            "src.clients.discord.commands.chat.generate_usage_chart"
+        ) as mock_chart:
+            mock_chart.return_value = b"\x89PNG\r\n\x1a\n"
+
+            await func(interaction)
+
+            interaction.followup.send.assert_called_once()
+            call_kwargs = interaction.followup.send.call_args.kwargs
+            assert "embed" in call_kwargs
+            assert "file" in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_show_usage_handles_error(self, show_usage_func: tuple) -> None:
+        """Test that /show_usage handles errors gracefully."""
+        func, bot = show_usage_func
+        bot.repo.get_top_users_by_usage.side_effect = Exception("Database error")
+        interaction = create_mock_interaction()
+
+        with patch(
+            "src.clients.discord.commands.chat.InfoEmbedView"
+        ) as mock_view_class:
+            mock_view = MagicMock()
+            mock_view.initialize = AsyncMock()
+            mock_view_class.return_value = mock_view
+
+            await func(interaction)
+
+            mock_view_class.assert_called()
+            call_kwargs = mock_view_class.call_args.kwargs
+            assert call_kwargs["is_error"] is True
+            assert "Usage Stats Error" in call_kwargs["title"]
+
+    @pytest.mark.asyncio
+    async def test_show_usage_default_is_server_only(
+        self, show_usage_func: tuple
+    ) -> None:
+        """Test that /show_usage defaults to server_only=True."""
+        func, bot = show_usage_func
+        interaction = create_mock_interaction(guild_id=99999)
+
+        with patch(
+            "src.clients.discord.commands.chat.generate_usage_chart"
+        ) as mock_chart:
+            mock_chart.return_value = b"\x89PNG\r\n\x1a\n"
+
+            # Call without server_only argument
+            await func(interaction)
+
+            # Should use guild_id since server_only defaults to True
+            bot.repo.get_top_users_by_usage.assert_called_once_with(99999, limit=5)
+
+    @pytest.mark.asyncio
+    async def test_show_usage_embed_has_correct_title(
+        self, show_usage_func: tuple
+    ) -> None:
+        """Test that /show_usage embed has correct title."""
+        func, _bot = show_usage_func
+        interaction = create_mock_interaction()
+
+        with patch(
+            "src.clients.discord.commands.chat.generate_usage_chart"
+        ) as mock_chart:
+            mock_chart.return_value = b"\x89PNG\r\n\x1a\n"
+
+            await func(interaction)
+
+            call_kwargs = interaction.followup.send.call_args.kwargs
+            embed = call_kwargs["embed"]
+            assert embed.title == "Usage Statistics"
+
+    @pytest.mark.asyncio
+    async def test_show_usage_embed_has_scope_footer(
+        self, show_usage_func: tuple
+    ) -> None:
+        """Test that /show_usage embed has scope in footer."""
+        func, _bot = show_usage_func
+        interaction = create_mock_interaction()
+
+        with patch(
+            "src.clients.discord.commands.chat.generate_usage_chart"
+        ) as mock_chart:
+            mock_chart.return_value = b"\x89PNG\r\n\x1a\n"
+
+            await func(interaction, server_only=True)
+
+            call_kwargs = interaction.followup.send.call_args.kwargs
+            embed = call_kwargs["embed"]
+            assert "This server only" in embed.footer.text
+
+    @pytest.mark.asyncio
+    async def test_show_usage_all_servers_scope_footer(
+        self, show_usage_func: tuple
+    ) -> None:
+        """Test that /show_usage shows all servers scope in footer."""
+        func, _bot = show_usage_func
+        interaction = create_mock_interaction()
+
+        with patch(
+            "src.clients.discord.commands.chat.generate_usage_chart"
+        ) as mock_chart:
+            mock_chart.return_value = b"\x89PNG\r\n\x1a\n"
+
+            await func(interaction, server_only=False)
+
+            call_kwargs = interaction.followup.send.call_args.kwargs
+            embed = call_kwargs["embed"]
+            assert "All servers" in embed.footer.text

@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import io
 import json
 import sqlite3
 from os import getenv
@@ -26,6 +27,7 @@ from src.core.auto_summarization import (
     get_auto_summarization_manager,
     perform_summarization,
 )
+from src.core.chart_utils import UserStats, generate_usage_chart
 from src.core.conversation import convert_context_to_messages
 from src.core.haiku import SummarizationError, haiku_summarize_conversation
 from src.core.image_utils import compress_image
@@ -1648,6 +1650,81 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                 user=embed_user,
                 title="Summarization Error",
                 description="An unexpected error occurred while summarizing. Please try again.",
+                is_error=True,
+            )
+            await error_view.initialize(interaction)
+
+    @bot.tree.command(  # type: ignore[arg-type]
+        description="Show usage statistics as a chart."
+    )
+    @app_commands.describe(
+        server_only="If True, show stats for this server only. If False, show all servers."
+    )
+    @count_command
+    async def show_usage(
+        interaction: discord.Interaction,
+        server_only: bool = True,
+    ) -> None:
+        """Display usage statistics as a chart.
+
+        Shows a stacked bar chart of the top 5 users by usage score.
+        Image commands are weighted 5x compared to text commands.
+
+        Args:
+            interaction: The Discord interaction.
+            server_only: If True, filter stats by current guild. If False, show all.
+        """
+        await interaction.response.defer()
+
+        embed_user = create_embed_user(interaction)
+
+        try:
+            # Get guild_id for filtering if server_only is True
+            guild_id = interaction.guild_id if server_only else None
+
+            # Get top users by usage
+            raw_stats = await bot.repo.get_top_users_by_usage(guild_id, limit=5)
+            # Cast to UserStats for type safety
+            stats: list[UserStats] = [
+                UserStats(
+                    user_id=s["user_id"],
+                    username=s["username"],
+                    image_count=s["image_count"],
+                    text_count=s["text_count"],
+                    total_score=s["total_score"],
+                )
+                for s in raw_stats
+            ]
+
+            # Determine chart title
+            if server_only and interaction.guild:
+                title = f"Top Users - {interaction.guild.name}"
+            elif server_only:
+                title = "Top Users - This Server"
+            else:
+                title = "Top Users - All Servers"
+
+            # Generate the chart
+            image_bytes = await generate_usage_chart(stats, title=title)
+
+            # Create Discord file and embed
+            file = discord.File(io.BytesIO(image_bytes), filename="usage_chart.png")
+            embed = discord.Embed(title="Usage Statistics", color=0x3498DB)
+            embed.set_image(url="attachment://usage_chart.png")
+
+            # Add scope info to embed
+            scope_text = "This server only" if server_only else "All servers"
+            embed.set_footer(text=f"Scope: {scope_text}")
+
+            await interaction.followup.send(embed=embed, file=file)
+
+        except Exception as e:
+            logger.exception("command_error", error=str(e))
+            error_view = InfoEmbedView(
+                message=interaction.message,
+                user=embed_user,
+                title="Usage Stats Error",
+                description="An unexpected error occurred while generating usage stats.",
                 is_error=True,
             )
             await error_view.initialize(interaction)
