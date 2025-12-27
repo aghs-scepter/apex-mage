@@ -288,7 +288,7 @@ class TestEditPromptPreviewView:
         )
 
         with patch(
-            "src.clients.discord.views.carousel.EditPromptPreviewView"
+            "src.clients.discord.views.edit_views.EditPromptPreviewView"
         ) as mock_view_class:
             mock_new_view = MagicMock()
             mock_new_view.initialize = AsyncMock()
@@ -322,7 +322,7 @@ class TestEditPromptPreviewViewWarning:
         )
 
         with patch(
-            "src.clients.discord.views.carousel.create_file_from_image"
+            "src.clients.discord.views.edit_views.create_file_from_image"
         ) as mock_create_file:
             mock_file = MagicMock()
             mock_file.filename = "test.jpeg"

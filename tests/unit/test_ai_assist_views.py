@@ -93,12 +93,12 @@ class TestAIAssistModal:
         modal.description._value = "make it darker"
 
         with patch(
-            "src.clients.discord.views.carousel.haiku_complete",
+            "src.clients.discord.views.ai_assist_views.haiku_complete",
             new_callable=AsyncMock,
             return_value="Reduce brightness by 40%, increase contrast",
         ) as mock_haiku:
             with patch(
-                "src.clients.discord.views.carousel.create_file_from_image",
+                "src.clients.discord.views.edit_views.create_file_from_image",
                 new_callable=AsyncMock,
                 return_value=mock_file,
             ):
@@ -129,12 +129,12 @@ class TestAIAssistModal:
         modal.description._value = "make it darker"
 
         with patch(
-            "src.clients.discord.views.carousel.haiku_complete",
+            "src.clients.discord.views.ai_assist_views.haiku_complete",
             new_callable=AsyncMock,
             return_value="Reduce brightness by 40%",
         ):
             with patch(
-                "src.clients.discord.views.carousel.create_file_from_image",
+                "src.clients.discord.views.edit_views.create_file_from_image",
                 new_callable=AsyncMock,
                 return_value=mock_file,
             ):
@@ -165,7 +165,7 @@ class TestAIAssistModal:
 
         # First call fails, second succeeds
         with patch(
-            "src.clients.discord.views.carousel.haiku_complete",
+            "src.clients.discord.views.ai_assist_views.haiku_complete",
             new_callable=AsyncMock,
             side_effect=[
                 HaikuError("API Error"),
@@ -174,7 +174,7 @@ class TestAIAssistModal:
         ) as mock_haiku:
             with patch("asyncio.sleep", new_callable=AsyncMock):
                 with patch(
-                    "src.clients.discord.views.carousel.create_file_from_image",
+                    "src.clients.discord.views.edit_views.create_file_from_image",
                     new_callable=AsyncMock,
                     return_value=mock_file,
                 ):
@@ -200,7 +200,7 @@ class TestAIAssistModal:
 
         # Both calls fail
         with patch(
-            "src.clients.discord.views.carousel.haiku_complete",
+            "src.clients.discord.views.ai_assist_views.haiku_complete",
             new_callable=AsyncMock,
             side_effect=HaikuError("API Error"),
         ):
@@ -276,7 +276,7 @@ class TestAIAssistResultView:
         )
 
         with patch(
-            "src.clients.discord.views.carousel.EditPromptPreviewView"
+            "src.clients.discord.views.edit_views.EditPromptPreviewView"
         ) as mock_preview:
             mock_preview_instance = MagicMock()
             mock_preview_instance.initialize = AsyncMock()
