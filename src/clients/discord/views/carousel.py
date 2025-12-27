@@ -877,6 +877,12 @@ class ImageEditTypeView(discord.ui.View):
                 )
                 return
 
+            self.stop()  # Stop timeout - user is committing to AI assist action
+            self.disable_buttons()
+            self.hide_buttons()
+            if self.message:
+                await self.message.edit(view=self)
+
             # Show the AI Assist modal
             modal = AIAssistModal(
                 image_data=self.image_data,
