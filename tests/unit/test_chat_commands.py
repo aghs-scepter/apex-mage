@@ -1218,3 +1218,121 @@ class TestWhitelistCommands:
         # Check that an embed was sent
         call_kwargs = interaction.followup.send.call_args.kwargs
         assert "embed" in call_kwargs
+
+
+# --- My Status Command Tests ---
+
+
+class TestMyStatusCommand:
+    """Tests for /my_status command."""
+
+    @pytest.fixture
+    def my_status_func(self) -> tuple:
+        """Get the my_status command function."""
+        bot = create_mock_bot()
+        commands: dict[str, Any] = {}
+
+        def capture_command(func=None, description=None, **kwargs):
+            if func is not None:
+                commands[func.__name__] = func
+                return func
+            return lambda f: (commands.update({f.__name__: f}), f)[1]
+
+        bot.tree.command = capture_command
+        register_chat_commands(bot)
+
+        return commands.get("my_status"), bot
+
+    @pytest.mark.asyncio
+    async def test_my_status_shows_banned_with_reason(
+        self, my_status_func: tuple
+    ) -> None:
+        """Test that /my_status shows banned status with reason."""
+        func, bot = my_status_func
+        user = create_mock_user(user_id=123)
+        interaction = create_mock_interaction(user=user)
+
+        bot.repo.is_user_banned.return_value = True
+        bot.repo.get_ban_reason.return_value = "Spamming"
+
+        await func(interaction)
+
+        interaction.response.send_message.assert_called_once()
+        call_args = interaction.response.send_message.call_args
+        assert "Banned" in call_args.args[0]
+        assert "Spamming" in call_args.args[0]
+        assert call_args.kwargs["ephemeral"] is True
+
+    @pytest.mark.asyncio
+    async def test_my_status_shows_banned_no_reason(
+        self, my_status_func: tuple
+    ) -> None:
+        """Test that /my_status shows banned status with default reason."""
+        func, bot = my_status_func
+        user = create_mock_user(user_id=123)
+        interaction = create_mock_interaction(user=user)
+
+        bot.repo.is_user_banned.return_value = True
+        bot.repo.get_ban_reason.return_value = None
+
+        await func(interaction)
+
+        interaction.response.send_message.assert_called_once()
+        call_args = interaction.response.send_message.call_args
+        assert "Banned" in call_args.args[0]
+        assert "No reason provided" in call_args.args[0]
+        assert call_args.kwargs["ephemeral"] is True
+
+    @pytest.mark.asyncio
+    async def test_my_status_shows_whitelisted(self, my_status_func: tuple) -> None:
+        """Test that /my_status shows whitelisted status."""
+        func, bot = my_status_func
+        user = create_mock_user(user_id=123)
+        interaction = create_mock_interaction(user=user)
+
+        bot.repo.is_user_banned.return_value = False
+        bot.repo.is_user_whitelisted.return_value = True
+
+        await func(interaction)
+
+        interaction.response.send_message.assert_called_once()
+        call_args = interaction.response.send_message.call_args
+        assert "Whitelisted" in call_args.args[0]
+        assert call_args.kwargs["ephemeral"] is True
+
+    @pytest.mark.asyncio
+    async def test_my_status_shows_not_whitelisted(
+        self, my_status_func: tuple
+    ) -> None:
+        """Test that /my_status shows not whitelisted status."""
+        func, bot = my_status_func
+        user = create_mock_user(user_id=123)
+        interaction = create_mock_interaction(user=user)
+
+        bot.repo.is_user_banned.return_value = False
+        bot.repo.is_user_whitelisted.return_value = False
+
+        await func(interaction)
+
+        interaction.response.send_message.assert_called_once()
+        call_args = interaction.response.send_message.call_args
+        assert "Not whitelisted" in call_args.args[0]
+        assert "@aghs" in call_args.args[0]
+        assert call_args.kwargs["ephemeral"] is True
+
+    @pytest.mark.asyncio
+    async def test_my_status_uses_correct_user_id(
+        self, my_status_func: tuple
+    ) -> None:
+        """Test that /my_status uses the interaction user's ID."""
+        func, bot = my_status_func
+        user = create_mock_user(user_id=42)
+        interaction = create_mock_interaction(user=user)
+
+        bot.repo.is_user_banned.return_value = False
+        bot.repo.is_user_whitelisted.return_value = True
+
+        await func(interaction)
+
+        bot.repo.is_user_banned.assert_called_once_with(42)
+        bot.repo.is_user_whitelisted.assert_called_once_with(42)
