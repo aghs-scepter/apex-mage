@@ -198,7 +198,7 @@ class TestImageGeneration:
             call_kwargs = mock_submit.call_args.kwargs
             # nano-banana-pro uses aspect_ratio instead of image_size
             assert "image_size" not in call_kwargs["arguments"]
-            assert call_kwargs["arguments"]["aspect_ratio"] == "1:1"
+            assert call_kwargs["arguments"]["aspect_ratio"] == "16:9"
             assert call_kwargs["arguments"]["resolution"] == "1K"
             assert call_kwargs["arguments"]["output_format"] == "jpeg"
 

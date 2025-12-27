@@ -242,7 +242,7 @@ class FalAIProvider:
         # Build arguments for Fal.AI nano-banana-pro API
         arguments: dict[str, Any] = {
             "prompt": request.prompt,
-            "aspect_ratio": "1:1",
+            "aspect_ratio": "16:9",
             "resolution": "1K",
             "output_format": "jpeg",
             "sync_mode": True,
