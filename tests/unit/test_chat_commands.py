@@ -1417,7 +1417,7 @@ class TestShowUsageCommand:
         """Test that /show_usage calls generate_usage_chart with stats."""
         func, bot = show_usage_func
         mock_stats = [
-            {"user_id": 123, "username": "Alice", "image_count": 10, "text_count": 50, "total_score": 100}
+            {"user_id": 123, "username": "Alice", "image_count": 10, "text_count": 50, "score": 100}
         ]
         bot.repo.get_top_users_by_usage.return_value = mock_stats
         interaction = create_mock_interaction()
@@ -1431,7 +1431,11 @@ class TestShowUsageCommand:
 
             mock_chart.assert_called_once()
             call_args = mock_chart.call_args
-            assert call_args[0][0] == mock_stats
+            # Stats are transformed from raw SQL (score) to UserStats (total_score)
+            expected_stats = [
+                {"user_id": 123, "username": "Alice", "image_count": 10, "text_count": 50, "total_score": 100}
+            ]
+            assert call_args[0][0] == expected_stats
 
     @pytest.mark.asyncio
     async def test_show_usage_sends_embed_with_file(

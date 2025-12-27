@@ -1691,7 +1691,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
                     username=s["username"],
                     image_count=s["image_count"],
                     text_count=s["text_count"],
-                    total_score=s["total_score"],
+                    total_score=s["score"],
                 )
                 for s in raw_stats
             ]
