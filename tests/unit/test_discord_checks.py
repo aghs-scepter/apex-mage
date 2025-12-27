@@ -46,25 +46,50 @@ class TestBanCheckCommandTree:
         # Should not raise any errors
         register_global_checks(mock_bot)
 
+    # Whitelist tests
+
     @pytest.mark.asyncio
-    async def test_ban_check_allows_non_banned_user(
+    async def test_non_whitelisted_user_is_denied(
         self, mock_bot: MagicMock, mock_interaction: MagicMock, command_tree: BanCheckCommandTree
     ) -> None:
-        """Test that non-banned users are allowed to use commands."""
+        """Test that non-whitelisted users are denied access."""
+        mock_bot.repo.is_user_whitelisted.return_value = False
+
+        result = await command_tree.interaction_check(mock_interaction)
+
+        # Should return False (deny access)
+        assert result is False
+        mock_bot.repo.is_user_whitelisted.assert_called_once_with(123456789)
+        # Should NOT check ban status for non-whitelisted users
+        mock_bot.repo.is_user_banned.assert_not_called()
+        # Should send access denied message
+        mock_interaction.response.send_message.assert_called_once_with(
+            "Access denied. Contact @aghs",
+            ephemeral=False,
+        )
+
+    @pytest.mark.asyncio
+    async def test_whitelisted_non_banned_user_is_allowed(
+        self, mock_bot: MagicMock, mock_interaction: MagicMock, command_tree: BanCheckCommandTree
+    ) -> None:
+        """Test that whitelisted, non-banned users are allowed to use commands."""
+        mock_bot.repo.is_user_whitelisted.return_value = True
         mock_bot.repo.is_user_banned.return_value = False
 
         result = await command_tree.interaction_check(mock_interaction)
 
         # Should return True (allow command)
         assert result is True
+        mock_bot.repo.is_user_whitelisted.assert_called_once_with(123456789)
         mock_bot.repo.is_user_banned.assert_called_once_with(123456789)
         mock_interaction.response.send_message.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_ban_check_blocks_banned_user(
+    async def test_whitelisted_banned_user_is_blocked(
         self, mock_bot: MagicMock, mock_interaction: MagicMock, command_tree: BanCheckCommandTree
     ) -> None:
-        """Test that banned users are blocked from using commands."""
+        """Test that whitelisted but banned users are blocked (ban takes precedence)."""
+        mock_bot.repo.is_user_whitelisted.return_value = True
         mock_bot.repo.is_user_banned.return_value = True
         mock_bot.repo.get_ban_reason.return_value = "Spamming"
 
@@ -72,10 +97,11 @@ class TestBanCheckCommandTree:
 
         # Should return False (block command)
         assert result is False
+        mock_bot.repo.is_user_whitelisted.assert_called_once_with(123456789)
         mock_bot.repo.is_user_banned.assert_called_once_with(123456789)
         mock_bot.repo.get_ban_reason.assert_called_once_with(123456789)
 
-        # Should send a visible (not ephemeral) message
+        # Should send a visible (not ephemeral) message with ban reason
         mock_interaction.response.send_message.assert_called_once_with(
             "You are banned from using this bot. Reason: Spamming",
             ephemeral=False,
@@ -86,6 +112,7 @@ class TestBanCheckCommandTree:
         self, mock_bot: MagicMock, mock_interaction: MagicMock, command_tree: BanCheckCommandTree
     ) -> None:
         """Test that banned users without a reason get a default message."""
+        mock_bot.repo.is_user_whitelisted.return_value = True
         mock_bot.repo.is_user_banned.return_value = True
         mock_bot.repo.get_ban_reason.return_value = None  # No reason provided
 
@@ -101,10 +128,11 @@ class TestBanCheckCommandTree:
         )
 
     @pytest.mark.asyncio
-    async def test_ban_check_uses_user_id_not_username(
+    async def test_whitelist_check_uses_user_id(
         self, mock_bot: MagicMock, mock_interaction: MagicMock, command_tree: BanCheckCommandTree
     ) -> None:
-        """Test that the check uses the user's ID (not username)."""
+        """Test that the whitelist check uses the user's ID (not username)."""
+        mock_bot.repo.is_user_whitelisted.return_value = True
         mock_bot.repo.is_user_banned.return_value = False
 
         # Set a different display_name vs username
@@ -115,4 +143,49 @@ class TestBanCheckCommandTree:
         await command_tree.interaction_check(mock_interaction)
 
         # Should use .id, not .name
+        mock_bot.repo.is_user_whitelisted.assert_called_once_with(987654321)
         mock_bot.repo.is_user_banned.assert_called_once_with(987654321)
+
+    # Exempt commands tests
+
+    @pytest.mark.asyncio
+    async def test_exempt_command_bypasses_whitelist_check(
+        self, mock_bot: MagicMock, mock_interaction: MagicMock, command_tree: BanCheckCommandTree
+    ) -> None:
+        """Test that exempt commands (like my_status) bypass whitelist/ban checks."""
+        # Set up as non-whitelisted user
+        mock_bot.repo.is_user_whitelisted.return_value = False
+
+        # Use an exempt command
+        mock_interaction.command.name = "my_status"
+
+        result = await command_tree.interaction_check(mock_interaction)
+
+        # Should return True (allow command) without checking whitelist
+        assert result is True
+        mock_bot.repo.is_user_whitelisted.assert_not_called()
+        mock_bot.repo.is_user_banned.assert_not_called()
+        mock_interaction.response.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_exempt_command_bypasses_ban_check(
+        self, mock_bot: MagicMock, mock_interaction: MagicMock, command_tree: BanCheckCommandTree
+    ) -> None:
+        """Test that banned users can still use exempt commands."""
+        # Set up as banned user
+        mock_bot.repo.is_user_whitelisted.return_value = True
+        mock_bot.repo.is_user_banned.return_value = True
+
+        # Use an exempt command
+        mock_interaction.command.name = "my_status"
+
+        result = await command_tree.interaction_check(mock_interaction)
+
+        # Should return True (allow command) without checking whitelist/ban
+        assert result is True
+        mock_bot.repo.is_user_whitelisted.assert_not_called()
+        mock_bot.repo.is_user_banned.assert_not_called()
+
+    def test_exempt_commands_includes_my_status(self) -> None:
+        """Test that EXEMPT_COMMANDS contains expected commands."""
+        assert "my_status" in BanCheckCommandTree.EXEMPT_COMMANDS

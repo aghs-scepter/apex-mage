@@ -20,25 +20,54 @@ class BanCheckCommandTree(app_commands.CommandTree["DiscordBot"]):
     before allowing any slash command to execute.
     """
 
-    async def interaction_check(self, interaction: discord.Interaction["DiscordBot"]) -> bool:
-        """Check if the user is banned before allowing command execution.
+    # Commands that bypass whitelist/ban checks (available to everyone)
+    EXEMPT_COMMANDS: frozenset[str] = frozenset({"my_status"})
 
-        If the user is banned, sends a visible (non-ephemeral) message
-        with the ban reason and prevents the command from executing.
+    async def interaction_check(self, interaction: discord.Interaction["DiscordBot"]) -> bool:
+        """Check if the user is whitelisted and not banned before allowing command execution.
+
+        Access control flow:
+        1. Skip check for exempt commands (e.g., /my_status)
+        2. Check whitelist first - deny if not whitelisted
+        3. Check banlist - ban takes precedence for whitelisted users
+        4. Allow if whitelisted and not banned
 
         Args:
             interaction: The Discord interaction to check.
 
         Returns:
-            True if the user is not banned and can proceed,
-            False if the user is banned.
+            True if the user is whitelisted and not banned,
+            False otherwise.
         """
         # Get the bot instance from the client
         bot = interaction.client
         user_id = interaction.user.id
         username = interaction.user.name
+        command_name = interaction.command.name if interaction.command else "unknown"
 
-        # Check if user is banned
+        # Allow exempt commands without any checks
+        if command_name in self.EXEMPT_COMMANDS:
+            return True
+
+        # Check whitelist first
+        is_whitelisted = await bot.repo.is_user_whitelisted(user_id)
+
+        if not is_whitelisted:
+            await interaction.response.send_message(
+                "Access denied. Contact @aghs",
+                ephemeral=False,
+            )
+
+            logger.info(
+                "non_whitelisted_user_command_blocked",
+                username=username,
+                user_id=user_id,
+                command=command_name,
+            )
+
+            return False
+
+        # Check if whitelisted user is banned (ban takes precedence)
         is_banned = await bot.repo.is_user_banned(user_id)
 
         if is_banned:
@@ -55,8 +84,8 @@ class BanCheckCommandTree(app_commands.CommandTree["DiscordBot"]):
             logger.info(
                 "banned_user_command_blocked",
                 username=username,
-                user_id=interaction.user.id,
-                command=interaction.command.name if interaction.command else "unknown",
+                user_id=user_id,
+                command=command_name,
                 reason=reason_text,
             )
 
