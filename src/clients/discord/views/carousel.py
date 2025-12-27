@@ -4,6 +4,44 @@ This module contains the main carousel and view classes for Discord UI.
 Some classes are imported from submodules for better organization.
 """
 
+# Explicit exports for mypy - includes both local classes and re-exports from submodules
+__all__ = [
+    # Re-exported from submodules
+    "AIAssistErrorView",
+    "AIAssistModal",
+    "AIAssistResultView",
+    "ClearHistoryConfirmationView",
+    "create_file_from_image",
+    "EditPromptEditModal",
+    "EditPromptPreviewView",
+    "GoogleSearchModal",
+    "ImageEditPromptModal",
+    "InfoEmbedView",
+    "PresetSelect",
+    "PresetSelectView",
+    "SummarizePreviewView",
+    "UnauthorizedModal",
+    # Local classes
+    "DescribeGoogleResultsCarouselView",
+    "DescribeImageSourceView",
+    "DescribeSingleImageCarouselView",
+    "DescriptionDisplayView",
+    "DescriptionEditModal",
+    "DescriptionRoutingView",
+    "EditPromptConfirmView",
+    "EditPromptModal",
+    "GoogleResultsCarouselView",
+    "ImageCarouselView",
+    "ImageEditPerformView",
+    "ImageEditResultView",
+    "ImageEditTypeView",
+    "ImageGenerationResultView",
+    "ImageSelectionTypeView",
+    "MultiImageCarouselView",
+    "RESULT_VIEW_TIMEOUT",
+    "VariationCarouselView",
+]
+
 import asyncio
 import base64
 import io
