@@ -748,3 +748,62 @@ class RepositoryAdapter:
             Returns None if the user has no usage records.
         """
         return await self._repo.get_user_usage_stats(user_id, guild_id)
+
+    # =========================================================================
+    # Whitelist Management Methods
+    # =========================================================================
+
+    async def is_user_whitelisted(self, user_id: int) -> bool:
+        """Check if a user is whitelisted.
+
+        Args:
+            user_id: The Discord user ID to check.
+
+        Returns:
+            True if the user is whitelisted, False otherwise.
+        """
+        return await self._repo.is_user_whitelisted(user_id)
+
+    async def get_whitelist_entry(self, user_id: int) -> dict[str, Any] | None:
+        """Get a whitelist entry for a user.
+
+        Args:
+            user_id: The Discord user ID to check.
+
+        Returns:
+            The whitelist entry as a dictionary, or None if not found.
+        """
+        return await self._repo.get_whitelist_entry(user_id)
+
+    async def add_to_whitelist(
+        self,
+        user_id: int,
+        username: str,
+        added_by: str,
+        notes: str | None = None,
+    ) -> None:
+        """Add a user to the whitelist.
+
+        Args:
+            user_id: The Discord user ID to whitelist.
+            username: The Discord username (for display purposes).
+            added_by: Who whitelisted this user.
+            notes: Optional notes about the user.
+        """
+        await self._repo.add_to_whitelist(user_id, username, added_by, notes)
+
+    async def remove_from_whitelist(self, user_id: int) -> None:
+        """Remove a user from the whitelist.
+
+        Args:
+            user_id: The Discord user ID to remove.
+        """
+        await self._repo.remove_from_whitelist(user_id)
+
+    async def list_whitelist(self) -> list[dict[str, Any]]:
+        """List all whitelisted users.
+
+        Returns:
+            List of whitelist entries as dictionaries, ordered by added_at desc.
+        """
+        return await self._repo.list_whitelist()

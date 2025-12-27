@@ -1168,3 +1168,5 @@ class MemoryRepository:
 
         self._usage_log.clear()
         self._usage_log_id_counter = 1
+
+        self._whitelist.clear()
