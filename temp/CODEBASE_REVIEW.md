@@ -159,3 +159,88 @@ None - findings are clear and actionable.
 ## Blockers
 
 None - review complete.
+
+---
+
+## Remediation Log
+
+### Priority Order (Optimized)
+
+| Order | Bead ID | Title | Priority | Est. Scope |
+|-------|---------|-------|----------|------------|
+| 1 | apex-mage-610 | [Lint] mypy exclude + auto-fix | P2 | Small |
+| 2 | apex-mage-thi | [DeadCode] Remove unused fn | P2 | Trivial |
+| 3 | apex-mage-ako | [Async] Fix blocking file read | P1 | Small |
+| 4 | apex-mage-6pa | [DRY] Consolidate constants | P2 | Small |
+| 5 | apex-mage-srs | [DRY] Extract duplicate fns | P1 | Medium |
+| 6 | apex-mage-o19 | [Logging] Standardize logging | P2 | Medium |
+| 7 | apex-mage-du6 | [Lint] Add pre-commit hooks | P1 | Small |
+| 8 | apex-mage-4ee | [Error] Fix silent exceptions | P1 | Large (23) |
+| 9 | apex-mage-100 | [Security] JWT verification | P2 | Small |
+| 10 | apex-mage-bbm | [Docs] Conventions guide | P2 | Medium |
+| 11 | apex-mage-xld | [Clarity] Split carousel.py | P1 | XLarge |
+| 12 | apex-mage-bqa | [Test] Discord command tests | P1 | Large |
+
+Rationale: Quick wins first, build momentum. Large refactors last.
+
+### Active Beads
+| Bead ID | Title | Status | Iteration | Agent |
+|---------|-------|--------|-----------|-------|
+| (none) | | | | |
+
+### Completed Beads
+| Bead ID | Title | Iterations | Commits | Notes |
+|---------|-------|------------|---------|-------|
+| apex-mage-610 | [Lint] mypy exclude + auto-fix | 2 | e7a87a9 | Scripts file removed in iter 2 |
+| apex-mage-thi | [DeadCode] Remove unused fn | 1 | 2decc05 | Clean removal |
+| apex-mage-ako | [Async] Fix blocking file read | 1 | 4e749c1 | asyncio.to_thread |
+| apex-mage-6pa | [DRY] Consolidate constants | 2 | d695bae,c5946fe | Core import fixed in iter 2 |
+| apex-mage-srs | [DRY] Extract duplicate fns | 2 | 8391936,042b221 | __init__ cleanup in iter 2 |
+| apex-mage-o19 | [Logging] Standardize logging | 1 | cbc23ab | 6 files, 23 logs converted |
+| apex-mage-du6 | [Lint] Add pre-commit hooks | 1 | 93a5bf4 | ruff + mypy + editorconfig |
+| apex-mage-4ee | [Error] Fix silent exceptions | 1 | 6588077 | 31 instances fixed |
+| apex-mage-100 | [Security] JWT verification | 1 | da48194 | Tests + docs added |
+| apex-mage-bbm | [Docs] Conventions guide | 1 | d23bfdb | 488 lines, 10 topics |
+| apex-mage-xld | [Clarity] Split carousel.py | 1 | 43e691b | 6 modules, 18% reduction |
+| apex-mage-bqa | [Test] Discord command tests | 1 | d721f54 | 48 tests, coverage 9%→62% |
+
+### Session Log
+
+#### Session: 2025-12-25T23:00
+**Started:** Remediation phase
+**Baseline:** 762 tests pass
+**Beads:** 12 open (6 P1, 6 P2)
+**Completed:** All 12 beads APPROVED
+**Final:** 813 tests pass (+51 new tests)
+**Commits:** 14
+**Total iterations:** 16 (4 beads needed iter 2)
+
+---
+
+## Remediation Complete
+
+**Completed:** 2025-12-26
+**Total beads:** 12
+**Total iterations:** 16
+**Total commits:** 14
+
+### Summary
+- Fixed all P1 and P2 findings from standards review
+- Lint/mypy exclusions added, pre-commit hooks configured
+- Silent exception handlers replaced with specific Discord exceptions (31 instances)
+- Duplicate code extracted to shared modules
+- carousel.py split into 7 focused modules (18% reduction)
+- Test coverage improved: chat.py 9%→63%, image.py 9%→57%
+- Documentation added: conventions.md, deployment.md updates
+
+### Key Metrics
+| Metric | Before | After |
+|--------|--------|-------|
+| Test count | 762 | 813 |
+| Discord cmd coverage | 9% | 62% |
+| Silent exceptions | 31 | 0 |
+| Duplicate functions | 2 | 0 |
+| carousel.py lines | 6,775 | 5,542 |
+
+### Remaining Items
+None - all findings addressed.
