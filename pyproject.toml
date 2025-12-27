@@ -87,5 +87,6 @@ module = [
     "google.*",
     "uvicorn.*",
     "aiohttp.*",
+    "matplotlib.*",
 ]
 ignore_missing_imports = true
