@@ -1453,7 +1453,7 @@ def register_chat_commands(bot: "DiscordBot") -> None:
 
         await interaction.followup.send(embed=embed)
 
-    @bot.tree.command(  # type: ignore[arg-type]
+    @bot.tree.command(
         description="Check your access status (available to everyone)."
     )
     async def my_status(interaction: discord.Interaction) -> None:
