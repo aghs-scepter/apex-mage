@@ -1426,6 +1426,9 @@ class ImageEditResultView(discord.ui.View):
         else:
             source_for_carousel = self.source_image_data_list[0]
 
+        # Extract base64 list from source images for reference consistency
+        source_b64_list = [img["image"] for img in self.source_image_data_list]
+
         # Transition to VariationCarouselView
         # Variations are of the EDIT RESULT (result_image_data), not the source
         # Source image is passed for reference comparison
@@ -1439,6 +1442,7 @@ class ImageEditResultView(discord.ui.View):
             repo=self.repo,
             image_provider=self.image_provider,
             rate_limiter=self.rate_limiter,
+            source_image_list=source_b64_list,  # Pass source images for variation consistency
         )
         await carousel.initialize(interaction)
 
@@ -5023,6 +5027,7 @@ class VariationCarouselView(discord.ui.View):
         repo: "RepositoryAdapter | None" = None,
         image_provider: "ImageProvider | None" = None,
         rate_limiter: "SlidingWindowRateLimiter | None" = None,
+        source_image_list: list[str] | None = None,
     ) -> None:
         """Initialize the variation carousel view.
 
@@ -5036,6 +5041,9 @@ class VariationCarouselView(discord.ui.View):
             repo: Repository adapter for storing images to context.
             image_provider: Image provider for generating variations.
             rate_limiter: Rate limiter for image generation.
+            source_image_list: Optional list of base64-encoded source images.
+                When provided, used as reference images for variation generation
+                to maintain visual consistency with the source.
         """
         super().__init__(timeout=RESULT_VIEW_TIMEOUT)
         self.interaction = interaction
@@ -5047,6 +5055,7 @@ class VariationCarouselView(discord.ui.View):
         self.repo = repo
         self.image_provider = image_provider
         self.rate_limiter = rate_limiter
+        self.source_image_list = source_image_list
         self.username, self.user_id, self.pfp = get_user_info(user)
         self.embed: discord.Embed | None = None
         self.added_to_context = False
@@ -5386,6 +5395,7 @@ class VariationCarouselView(discord.ui.View):
                 image_provider=self.image_provider,
                 user_id=self.user_id,
                 rate_limiter=self.rate_limiter,
+                reference_images=self.source_image_list,
             )
 
             # Add the variation and navigate to it
@@ -5490,6 +5500,7 @@ class VariationCarouselView(discord.ui.View):
                 image_provider=self.image_provider,
                 user_id=self.user_id,
                 rate_limiter=self.rate_limiter,
+                reference_images=self.source_image_list,
             )
 
             # Add the variation and navigate to it

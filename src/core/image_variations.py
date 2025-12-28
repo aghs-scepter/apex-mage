@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from src.core.haiku import HaikuError, haiku_complete
 from src.core.image_utils import compress_image, image_strip_headers
 from src.core.logging import get_logger
-from src.core.providers import ImageRequest
+from src.core.providers import ImageModifyRequest, ImageRequest
 
 if TYPE_CHECKING:
     from src.core.providers import ImageProvider
@@ -106,6 +106,7 @@ async def generate_variation_same_prompt(
     image_provider: ImageProvider,
     user_id: int,
     rate_limiter: SlidingWindowRateLimiter | None = None,
+    reference_images: list[str] | None = None,
 ) -> dict[str, str]:
     """Generate an image variation using the same prompt.
 
@@ -117,6 +118,9 @@ async def generate_variation_same_prompt(
         image_provider: The image provider to use for generation.
         user_id: The user ID for rate limiting.
         rate_limiter: Optional rate limiter to check/record usage.
+        reference_images: Optional list of base64-encoded reference images.
+            When provided, uses image-to-image (modify) instead of text-to-image
+            (generate) for visual consistency with the source images.
 
     Returns:
         A dict with 'filename' and 'image' (base64) keys, compatible
@@ -133,13 +137,26 @@ async def generate_variation_same_prompt(
         "generating_same_prompt_variation",
         prompt_length=len(original_prompt),
         user_id=user_id,
+        using_reference_images=reference_images is not None,
+        reference_image_count=len(reference_images) if reference_images else 0,
     )
 
     try:
         async with asyncio.timeout(API_TIMEOUT_SECONDS):
-            generated_images = await image_provider.generate(
-                ImageRequest(prompt=original_prompt)
-            )
+            if reference_images:
+                # Use image-to-image for visual consistency
+                generated_images = await image_provider.modify(
+                    ImageModifyRequest(
+                        image_data=reference_images[0],
+                        prompt=original_prompt,
+                        image_data_list=reference_images,
+                    )
+                )
+            else:
+                # Use text-to-image (original behavior)
+                generated_images = await image_provider.generate(
+                    ImageRequest(prompt=original_prompt)
+                )
 
         if not generated_images:
             raise VariationError("No images returned from provider")
@@ -233,6 +250,7 @@ async def generate_variation_remixed(
     image_provider: ImageProvider,
     user_id: int,
     rate_limiter: SlidingWindowRateLimiter | None = None,
+    reference_images: list[str] | None = None,
 ) -> tuple[str, dict[str, str]]:
     """Generate an image variation with an AI-remixed prompt.
 
@@ -244,6 +262,9 @@ async def generate_variation_remixed(
         image_provider: The image provider to use for generation.
         user_id: The user ID for rate limiting.
         rate_limiter: Optional rate limiter to check/record usage.
+        reference_images: Optional list of base64-encoded reference images.
+            When provided, uses image-to-image (modify) instead of text-to-image
+            (generate) for visual consistency with the source images.
 
     Returns:
         A tuple of (remixed_prompt, image_data) where image_data is a dict
@@ -260,6 +281,8 @@ async def generate_variation_remixed(
         "generating_remixed_variation",
         prompt_length=len(original_prompt),
         user_id=user_id,
+        using_reference_images=reference_images is not None,
+        reference_image_count=len(reference_images) if reference_images else 0,
     )
 
     # First, remix the prompt using Haiku
@@ -267,9 +290,20 @@ async def generate_variation_remixed(
 
     try:
         async with asyncio.timeout(API_TIMEOUT_SECONDS):
-            generated_images = await image_provider.generate(
-                ImageRequest(prompt=remixed_prompt)
-            )
+            if reference_images:
+                # Use image-to-image for visual consistency
+                generated_images = await image_provider.modify(
+                    ImageModifyRequest(
+                        image_data=reference_images[0],
+                        prompt=remixed_prompt,
+                        image_data_list=reference_images,
+                    )
+                )
+            else:
+                # Use text-to-image (original behavior)
+                generated_images = await image_provider.generate(
+                    ImageRequest(prompt=remixed_prompt)
+                )
 
         if not generated_images:
             raise VariationError("No images returned from provider")
