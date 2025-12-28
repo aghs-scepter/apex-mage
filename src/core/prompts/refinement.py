@@ -104,5 +104,6 @@ Take the user's rough description and create a detailed prompt that:
 1. Explicitly instructs to preserve the character's appearance
 2. Describes the requested changes clearly
 3. Emphasizes maintaining visual consistency
+4. Keep output under 200 characters when possible
 
 Output ONLY the refined prompt, no explanations."""

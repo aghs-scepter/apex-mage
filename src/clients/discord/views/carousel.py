@@ -1281,11 +1281,14 @@ class ImageEditResultView(discord.ui.View):
             icon_url=self.pfp,
         )
 
-        # Add prompt as a field
+        # Add prompt as a field (truncated if too long for embed field limit)
         if self.prompt:
+            display_prompt = self.prompt
+            if len(display_prompt) > 1024:
+                display_prompt = display_prompt[:1021] + "..."
             self.embed.add_field(
                 name="Prompt",
-                value=self.prompt,
+                value=display_prompt,
                 inline=False,
             )
 
