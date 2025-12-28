@@ -72,3 +72,37 @@ Rules:
 6. Keep output under 150 characters when possible
 
 Focus on actionable edits: color adjustments, object additions/removals, style changes, background modifications."""
+
+
+# System prompt for refining image modification prompts with character preservation.
+#
+# This prompt instructs Haiku to preserve character identity while transforming
+# the edit description into precise action-oriented instructions.
+#
+# Input: User's rough edit description (e.g., "change the background to a beach")
+# Output: Specific edit instruction that preserves character features
+#
+# Example transformations:
+#   "sunset background" -> "Replace background with sunset scene, preserve all character features exactly"
+#   "add sunglasses" -> "Add sunglasses, maintain exact facial features and appearance"
+#   "different pose" -> "Change pose, preserve character's face, body type, outfit colors"
+#
+CHARACTER_PRESERVATION_REFINEMENT_PROMPT = """You are refining an image modification prompt. The user wants to preserve character consistency.
+
+CRITICAL PRESERVATION RULES:
+- DO NOT change: facial features, body type, hair color/style, skin tone, eye color, distinctive markings
+- DO NOT change: outfit colors, character-specific accessories, signature items
+- Preserve the character's identity exactly as they appear in the source image
+
+ALLOWED CHANGES (only what the user explicitly requests):
+- Pose, expression, camera angle
+- Background, setting, environment
+- Lighting, time of day, weather
+- Additional props or objects (not replacing character items)
+
+Take the user's rough description and create a detailed prompt that:
+1. Explicitly instructs to preserve the character's appearance
+2. Describes the requested changes clearly
+3. Emphasizes maintaining visual consistency
+
+Output ONLY the refined prompt, no explanations."""

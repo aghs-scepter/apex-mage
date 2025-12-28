@@ -18,7 +18,10 @@ from src.clients.discord.utils import get_user_info
 from src.clients.discord.views.base_views import create_file_from_image
 from src.core.haiku import HaikuError, haiku_complete
 from src.core.logging import get_logger
-from src.core.prompts.refinement import IMAGE_MODIFICATION_REFINEMENT_PROMPT
+from src.core.prompts.refinement import (
+    CHARACTER_PRESERVATION_REFINEMENT_PROMPT,
+    IMAGE_MODIFICATION_REFINEMENT_PROMPT,
+)
 
 if TYPE_CHECKING:
     pass
@@ -43,12 +46,14 @@ class AIAssistModal(discord.ui.Modal, title="AI Assist - Describe Your Edit"):
         on_select: (
             Callable[[discord.Interaction, str, str], Coroutine[Any, Any, None]] | None
         ) = None,
+        preserve_character: bool = False,
     ) -> None:
         super().__init__(timeout=None)
         self.image_data = image_data
         self.user = user
         self.message = message
         self.on_select = on_select
+        self.preserve_character = preserve_character
 
         self.description: discord.ui.TextInput[AIAssistModal] = discord.ui.TextInput(
             label="Describe what changes you want:",
@@ -68,6 +73,12 @@ class AIAssistModal(discord.ui.Modal, title="AI Assist - Describe Your Edit"):
 
         rough_description = self.description.value
 
+        # Select appropriate prompt based on character preservation setting
+        if self.preserve_character:
+            system_prompt = CHARACTER_PRESERVATION_REFINEMENT_PROMPT
+        else:
+            system_prompt = IMAGE_MODIFICATION_REFINEMENT_PROMPT
+
         # Call Haiku to refine the prompt with retry logic
         refined_prompt = None
         last_error = None
@@ -75,7 +86,7 @@ class AIAssistModal(discord.ui.Modal, title="AI Assist - Describe Your Edit"):
         for attempt in range(2):  # Try twice (initial + 1 retry)
             try:
                 refined_prompt = await haiku_complete(
-                    system_prompt=IMAGE_MODIFICATION_REFINEMENT_PROMPT,
+                    system_prompt=system_prompt,
                     user_message=rough_description,
                     max_tokens=256,
                 )
