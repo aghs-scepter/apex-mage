@@ -777,6 +777,7 @@ class ImageEditTypeView(discord.ui.View):
         self.message = message
         self.on_select = on_select
         self.on_back = on_back
+        self.preserve_character: bool = False
         logger.debug("view_initialized", view="ImageEditTypeView")
 
     async def initialize(self, interaction: discord.Interaction) -> None:
@@ -889,6 +890,7 @@ class ImageEditTypeView(discord.ui.View):
                 user=self.user,
                 message=self.message,
                 on_select=self.on_select,
+                preserve_character=self.preserve_character,
             )
             await interaction.response.send_modal(modal)
 
@@ -931,6 +933,31 @@ class ImageEditTypeView(discord.ui.View):
             if self.message:
                 await self.message.edit(embed=self.embed, attachments=[], view=self)
             await self.on_select(interaction, "Cancel", "")
+
+    @discord.ui.button(label="Preserve Character", style=discord.ButtonStyle.secondary, row=1)
+    async def preserve_character_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button["ImageEditTypeView"]
+    ) -> None:
+        """Toggle character preservation mode for AI Assist."""
+        if self.user_id != interaction.user.id:
+            await interaction.response.send_message(
+                f"Only the original requester ({self.username}) can toggle this option.",
+                ephemeral=True,
+            )
+            return
+
+        # Toggle the state
+        self.preserve_character = not self.preserve_character
+
+        # Update button appearance
+        if self.preserve_character:
+            button.label = "Preserve Character [ON]"
+            button.style = discord.ButtonStyle.success
+        else:
+            button.label = "Preserve Character"
+            button.style = discord.ButtonStyle.secondary
+
+        await interaction.response.edit_message(view=self)
 
     async def on_timeout(self) -> None:
         """Update the embed on timeout."""
