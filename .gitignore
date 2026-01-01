@@ -8,3 +8,13 @@ site/*
 
 # Beads issue tracking (local state)
 .beads/
+
+# Coverage data
+.coverage
+htmlcov/
+
+# UV package manager
+uv.lock
+
+# Development scripts (migrations, one-off utilities)
+scripts/

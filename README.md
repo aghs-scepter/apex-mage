@@ -1,13 +1,19 @@
 # Apex Mage
-**Apex Mage** is a versatile, self-hosted Discord bot that brings AI chat and image capabilities to your server and DMs.
 
-Engage in natural conversation, analyze images, and generate art(?) using simple slash commands. You'll get context-aware responses while respecting user privacy through channel- and DM-specific chats that are kept completely separate.
+[![CI](https://github.com/aghs-scepter/apex-mage/actions/workflows/ci.yml/badge.svg)](https://github.com/aghs-scepter/apex-mage/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/aghs-scepter/apex-mage)](https://github.com/aghs-scepter/apex-mage/releases/latest)
+[![License](https://img.shields.io/badge/license-non--commercial-blue)](LICENSE)
 
-Free and open source under a collaborative license - feel free to modify and enhance, with a gentle request to contribute improvements back to the community.
+**Apex Mage** is a self-hosted Discord bot that brings AI chat and image capabilities to your server and DMs.
 
-**If you need support or encounter issues with installation, [reach out to me on Discord](https://discord.com/users/833494957024870401)**
+Chat naturally with Claude, generate and edit images, and manage conversation behavior with simple slash commands. Conversations are kept separate per-channel for privacy, and everything runs on your own infrastructure.
+
+Free and open source under a non-commercial license. Feel free to modify and enhance, with a gentle request to contribute improvements back.
+
+**If you need support or encounter issues, [reach out to me on Discord](https://discord.com/users/833494957024870401)**
 
 ## Requirements
+
 As a Discord bot, Apex Mage requires some setup via the [Discord Developer Portal](https://discord.com/developers). Instructions for a basic bot setup are available [here](https://discordgsm.com/guide/how-to-get-a-discord-bot-token).
 
 The bot's AI features require API keys for [Anthropic](https://console.anthropic.com) and [Fal.AI](https://fal.ai). When initially setting up the bot, you'll be prompted for these keys, so it would be wise to set up accounts on these services in advance. Instructions are available for both [the Anthropic API](https://docs.anthropic.com/en/api/getting-started#accessing-the-api) and [the Fal.AI API](https://docs.fal.ai/authentication/key-based/).
@@ -55,20 +61,51 @@ In Discord, invite your bot to a server and give it a test command, such as:
 /prompt prompt:hello world!
 ```
 
-
 ## Commands
 
 Users can interact with Apex Mage via the slash commands below.
 
-- `/prompt` - Submits a prompt to the Anthropic API, returning a text response. Users can optionally include an image in `png`, `jpg`, or `jpeg` format with their prompt. Conversations with the bot are persistent, so users can refer to past text and images in follow-up prompts.
+### Chat
 
-- `/create_image` - Submits a prompt to the Fal.AI API, returning an image as a message attachment. This command **does not include conversation context**, so prompts should include all of the information needed to generate the image.
+- `/prompt` - Chat with the AI. You can optionally include an image in `png`, `jpg`, or `jpeg` format. Conversations are persistent, so you can refer to past messages and images in follow-up prompts.
 
-- `/behavior` - Changes the behavior and personality of the text bot based on the submitted prompt. This only changes the behavior of the bot reached via the `/prompt` command and does not affect image generation.
+- `/clear` - Clears the bot's memory of the current channel. All prior prompts, responses, and images are forgotten.
 
-- `/clear` - Resets the bot to default state. All prior prompts, responses, and images are cleared from memory, and the bot's text behavior is set to default.
+- `/summarize` - Summarizes the conversation to reduce token usage. Useful for long conversations that are hitting context limits.
 
-- `/help` - Displays a list of commands with quick instructions for use.
+### Images
+
+- `/create_image` - Generates an image from your text description. The bot offers to refine your prompt before generating.
+
+- `/modify_image` - Edits an existing image. You can pick from recent images in the channel or search Google Images. Supports using up to 3 reference images.
+
+- `/describe_this` - Gets an AI description of an image, useful for generating similar images later. You can upload directly or select from recent/Google images.
+
+- `/upload_image` - Uploads an image to the bot's context for use in future prompts.
+
+### Behavior
+
+- `/set_behavior custom` - Sets a custom personality/behavior for the AI in the current channel.
+
+- `/set_behavior preset` - Selects a saved behavior preset from a dropdown menu.
+
+- `/behavior_preset create` - Creates a new behavior preset for your server.
+
+- `/behavior_preset list` - Lists all behavior presets available on your server.
+
+- `/behavior_preset view` - Views the full details of a specific preset.
+
+- `/behavior_preset edit` - Edits an existing preset (creator or admin only).
+
+- `/behavior_preset delete` - Deletes a preset (creator or admin only).
+
+### Other
+
+- `/my_status` - Checks if you're whitelisted or banned.
+
+- `/show_usage` - Shows usage statistics as a chart.
+
+- `/help` - Displays a quick reference of available commands.
 
 ## License
 
